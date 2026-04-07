@@ -70,12 +70,13 @@
     }
     .btn-close:hover { background: rgba(239,68,68,0.3); color: #ef4444; }
 
-    .header-info { display: flex; align-items: center; gap: 10px; flex: 1; }
-    .header-avatar { width: 34px; height: 34px; border-radius: 10px; object-fit: cover; background: rgba(255,255,255,0.06); }
-    .header-name { font-size: 15px; font-weight: 600; }
+    .header-info { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+    .header-avatar { width: 34px; height: 34px; border-radius: 10px; object-fit: cover; background: rgba(255,255,255,0.06); flex-shrink: 0; }
+    .header-text { display: flex; flex-direction: column; min-width: 0; }
+    .header-name { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .header-role {
       font-size: 11px; color: var(--text-secondary);
-      background: var(--bg-card); padding: 2px 8px; border-radius: 10px;
+      white-space: nowrap;
     }
 
     /* Messages - scrollable area */
@@ -227,8 +228,10 @@
         <button class="btn-close" id="close-btn">✕</button>
         <div class="header-info">
           <img class="header-avatar" id="avatar" src="">
-          <span class="header-name" id="name"></span>
-          <span class="header-role" id="role"></span>
+          <div class="header-text">
+            <span class="header-name" id="name"></span>
+            <span class="header-role" id="role"></span>
+          </div>
         </div>
         <button class="btn-agent-settings" id="agent-settings-btn" title="캐릭터 설정" style="
           width:28px;height:28px;border-radius:8px;border:none;

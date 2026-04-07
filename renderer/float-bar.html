@@ -310,23 +310,20 @@
     });
 
 
-    function applyLayout(pos) {
-      document.body.classList.remove('vertical', 'top-mode');
-      document.body.classList.add('fixed');
+    async function refreshLayout() {
+      const [pos, pinned] = await Promise.all([
+        window.api.getBarPosition(),
+        window.api.getBarPinned(),
+      ]);
+      document.body.classList.remove('vertical', 'top-mode', 'fixed');
       if (pos === 'left' || pos === 'right') document.body.classList.add('vertical');
       if (pos === 'top') document.body.classList.add('top-mode');
+      if (pinned) document.body.classList.add('fixed');
     }
 
-    window.api.onBarLayout((layout) => {
-      window.api.getBarPosition().then(applyLayout);
-    });
-
-    window.api.getBarPosition().then(applyLayout);
-
-    // 고정 해제 시 hover 복원
-    window.api.getBarPinned().then(pinned => {
-      if (!pinned) document.body.classList.remove('fixed');
-    });
+    window.api.onBarLayout(() => refreshLayout());
+    window.api.onBarPinned(() => refreshLayout());
+    refreshLayout();
 
     buildBar();
   </script>
