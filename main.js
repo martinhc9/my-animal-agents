@@ -215,11 +215,24 @@ function createChatWindow(agentId) {
   const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize;
   const barBounds = floatBar && !floatBar.isDestroyed()
     ? floatBar.getBounds()
-    : { x: Math.round(screenWidth / 2 - 210), y: screenHeight - 100, width: 420 };
+    : { x: Math.round(screenWidth / 2 - 210), y: screenHeight - 100, width: 420, height: 100 };
+  const orientation = store.get('floatbar-orientation', 'horizontal');
   const chatWidth = 400;
   const chatHeight = 520;
-  const chatX = Math.max(0, Math.min(screenWidth - chatWidth, Math.round(barBounds.x + barBounds.width / 2 - chatWidth / 2)));
-  const chatY = Math.max(10, barBounds.y - chatHeight - 10);
+
+  let chatX, chatY;
+  if (orientation === 'vertical-left') {
+    chatX = barBounds.x + barBounds.width + 10;
+    chatY = Math.max(10, Math.round(barBounds.y + barBounds.height / 2 - chatHeight / 2));
+  } else if (orientation === 'vertical-right') {
+    chatX = barBounds.x - chatWidth - 10;
+    chatY = Math.max(10, Math.round(barBounds.y + barBounds.height / 2 - chatHeight / 2));
+  } else {
+    chatX = Math.round(barBounds.x + barBounds.width / 2 - chatWidth / 2);
+    chatY = Math.max(10, barBounds.y - chatHeight - 10);
+  }
+  chatX = Math.max(0, Math.min(screenWidth - chatWidth, chatX));
+  chatY = Math.max(10, Math.min(screenHeight - chatHeight, chatY));
 
   chatWindow = new BrowserWindow({
     width: chatWidth,
@@ -380,7 +393,13 @@ ipcMain.handle('reset-bar-position', () => {
   const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize;
   const bounds = { width: 420, height: 100, x: Math.round(screenWidth / 2 - 210), y: screenHeight - 100 };
   store.delete('floatbar-bounds');
-  if (floatBar && !floatBar.isDestroyed()) floatBar.setBounds(bounds);
+  store.delete('floatbar-orientation');
+  if (floatBar && !floatBar.isDestroyed()) {
+    floatBar.setMinimumSize(200, 80);
+    floatBar.setMaximumSize(9999, 120);
+    floatBar.setBounds(bounds);
+    floatBar.webContents.send('orientation-change', 'horizontal');
+  }
   return true;
 });
 
@@ -403,27 +422,7 @@ ipcMain.handle('get-llm-status', async () => {
   return { ready: ollamaReady, model: DEFAULT_MODEL };
 });
 
-// --- RSS 뉴스 ---
-async function fetchHRNews() {
-  try {
-    const queries = ['HR+인사+채용+트렌드', '노동시장+채용+2026', '조직문화+인사관리'];
-    const query = queries[Math.floor(Math.random() * queries.length)];
-    const res = await fetch(`https://news.google.com/rss/search?q=${query}&hl=ko&gl=KR&ceid=KR:ko`);
-    const xml = await res.text();
-    const items = [];
-    const re = /<item>([\s\S]*?)<\/item>/g;
-    let m;
-    while ((m = re.exec(xml)) !== null && items.length < 8) {
-      const x = m[1];
-      const title = (x.match(/<title>([\s\S]*?)<\/title>/) || [])[1] || '';
-      const link = (x.match(/<link>([\s\S]*?)<\/link>/) || [])[1] || '';
-      const source = (x.match(/<source[^>]*>([\s\S]*?)<\/source>/) || [])[1] || '';
-      if (title) items.push({ title: title.replace(/<!\[CDATA\[|\]\]>/g, '').trim(), link, source });
-    }
-    return items;
-  } catch { return []; }
-}
-
+// --- RSS 뉴스 (카피바라용) ---
 async function fetchTrendNews() {
   try {
     const queries = ['트렌드+화제+2026', '핫이슈+화제', 'MZ세대+트렌드+핫'];
@@ -511,9 +510,10 @@ ipcMain.handle('chat', async (_, { agent, messages }) => {
   // 백그라운드에서 Ollama 호출 — 창 닫혀도 계속 진행
   pendingChats.set(agent, { status: 'loading' });
 
-  buildSystemPrompt(agent).then(systemPrompt => {
+  (async () => {
+    const systemPrompt = await buildSystemPrompt(agent);
     return ollamaChat(systemPrompt, messages);
-  }).then(content => {
+  })().then(content => {
     addXP(agent);
     // 히스토리에 응답 저장
     const saved = store.get(historyKey, []);
