@@ -342,7 +342,7 @@ ipcMain.handle('drag-end', () => {
 
   const { width: sw } = screen.getPrimaryDisplay().workAreaSize;
   const bounds = floatBar.getBounds();
-  const EDGE = 80;
+  const EDGE = 10;
 
   let orientation = 'horizontal';
   if (bounds.x <= EDGE) orientation = 'vertical-left';
