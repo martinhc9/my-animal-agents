@@ -146,15 +146,18 @@
     body.vertical {
       justify-content: center;
     }
-    body.vertical .trigger-zone {
-      display: none;
-    }
     body.vertical .bar {
       flex-direction: column;
       padding: 18px 10px;
       margin: auto 6px;
       border-radius: 24px;
-      transform: none;
+      transform: translateX(80px);
+    }
+    body.vertical-left .bar {
+      transform: translateX(-80px);
+    }
+    body.vertical:hover .bar {
+      transform: translateX(0);
       opacity: 1;
     }
     body.vertical .agent-btn:hover {
@@ -358,6 +361,7 @@
         if (isDragging) {
           isDragging = false;
           bar.style.cursor = 'grab';
+          window.api.dragEnd();
         }
       });
     })();

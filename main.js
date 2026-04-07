@@ -332,36 +332,38 @@ ipcMain.handle('set-mouse-through', (_, through) => {
 ipcMain.handle('move-bar-by', (_, dx, dy) => {
   if (floatBar && !floatBar.isDestroyed()) {
     const [x, y] = floatBar.getPosition();
-    const newX = x + dx;
-    const newY = y + dy;
-    floatBar.setPosition(newX, newY);
-
-    // 화면 가장자리 감지 → 수직/수평 전환
-    const { width: sw } = screen.getPrimaryDisplay().workAreaSize;
-    const bounds = floatBar.getBounds();
-    const EDGE = 60;
-    let orientation = 'horizontal';
-    if (newX <= EDGE) orientation = 'vertical-left';
-    else if (newX + bounds.width >= sw - EDGE) orientation = 'vertical-right';
-
-    // 방향에 따라 윈도우 크기 조정
-    const prevOrientation = store.get('floatbar-orientation', 'horizontal');
-    if (orientation !== prevOrientation) {
-      if (orientation === 'horizontal') {
-        floatBar.setMinimumSize(200, 80);
-        floatBar.setMaximumSize(9999, 120);
-        floatBar.setSize(420, 100);
-      } else {
-        floatBar.setMinimumSize(80, 200);
-        floatBar.setMaximumSize(120, 9999);
-        floatBar.setSize(100, 420);
-      }
-      store.set('floatbar-orientation', orientation);
-      floatBar.webContents.send('orientation-change', orientation);
-    }
-
-    store.set('floatbar-bounds', floatBar.getBounds());
+    floatBar.setPosition(x + dx, y + dy);
   }
+});
+
+// 드래그 끝났을 때만 방향 판단 + 위치 저장
+ipcMain.handle('drag-end', () => {
+  if (!floatBar || floatBar.isDestroyed()) return;
+
+  const { width: sw } = screen.getPrimaryDisplay().workAreaSize;
+  const bounds = floatBar.getBounds();
+  const EDGE = 80;
+
+  let orientation = 'horizontal';
+  if (bounds.x <= EDGE) orientation = 'vertical-left';
+  else if (bounds.x + bounds.width >= sw - EDGE) orientation = 'vertical-right';
+
+  const prev = store.get('floatbar-orientation', 'horizontal');
+  if (orientation !== prev) {
+    if (orientation === 'horizontal') {
+      floatBar.setMinimumSize(200, 80);
+      floatBar.setMaximumSize(9999, 120);
+      floatBar.setSize(420, 100);
+    } else {
+      floatBar.setMinimumSize(80, 200);
+      floatBar.setMaximumSize(120, 9999);
+      floatBar.setSize(100, 420);
+    }
+    store.set('floatbar-orientation', orientation);
+    floatBar.webContents.send('orientation-change', orientation);
+  }
+
+  store.set('floatbar-bounds', floatBar.getBounds());
 });
 
 ipcMain.handle('reset-bar-position', () => {

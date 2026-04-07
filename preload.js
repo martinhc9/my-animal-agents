@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('api', {
   saveHistory: (agentId, messages) => ipcRenderer.invoke('save-history', { agentId, messages }),
   setMouseThrough: (through) => ipcRenderer.invoke('set-mouse-through', through),
   moveBarBy: (dx, dy) => ipcRenderer.invoke('move-bar-by', dx, dy),
+  dragEnd: () => ipcRenderer.invoke('drag-end'),
   resetBarPosition: () => ipcRenderer.invoke('reset-bar-position'),
   // 다마고치
   getAffinity: (agentId) => ipcRenderer.invoke('get-affinity', agentId),
