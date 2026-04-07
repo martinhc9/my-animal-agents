@@ -28,15 +28,9 @@
       -webkit-backdrop-filter: blur(20px);
       border: 1px solid rgba(255, 255, 255, 0.12);
       box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-      transform: translateY(80px);
-      transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease;
-      opacity: 0;
+      transition: transform 0.2s ease;
     }
 
-    body:hover .bar {
-      transform: translateY(0);
-      opacity: 1;
-    }
 
     .agent-btn {
       width: 56px;
@@ -133,12 +127,6 @@
     .settings-btn:hover {
       background: rgba(255, 255, 255, 0.12);
       transform: rotate(45deg);
-    }
-
-    /* 고정 모드 — hover 없이 항상 표시 */
-    body.fixed .bar {
-      transform: none;
-      opacity: 1;
     }
 
     /* 수직 모드 */
