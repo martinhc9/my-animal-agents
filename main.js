@@ -253,8 +253,12 @@ function createFloatBar() {
 
   floatBar.loadFile(path.join(__dirname, 'renderer', 'float-bar.html'));
   floatBar.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  const pinned = store.get('bar-pinned', false);
-  floatBar.setIgnoreMouseEvents(!pinned, { forward: true });
+  const pinned = store.get('bar-pinned', true);
+  if (!pinned) {
+    floatBar.hide();
+  } else {
+    floatBar.setIgnoreMouseEvents(false);
+  }
 
   const saveBounds = () => {
     if (floatBar && !floatBar.isDestroyed()) {
@@ -292,6 +296,17 @@ function createTray() {
   if (trayImage.isEmpty()) tray.setTitle('🐾');
 
   const trayMenu = Menu.buildFromTemplate([
+    { label: '바 보기/숨기기', click: () => {
+      if (floatBar && !floatBar.isDestroyed()) {
+        if (floatBar.isVisible()) {
+          floatBar.hide();
+          store.set('bar-pinned', false);
+        } else {
+          floatBar.show();
+          store.set('bar-pinned', true);
+        }
+      }
+    }},
     { label: '설정', click: () => createChatWindow('settings') },
     { label: '원위치 복귀', click: () => {
       const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
@@ -509,13 +524,17 @@ ipcMain.handle('get-bar-position', () => store.get('bar-position', 'bottom'));
 ipcMain.handle('set-bar-pinned', (_, pinned) => {
   store.set('bar-pinned', pinned);
   if (floatBar && !floatBar.isDestroyed()) {
-    // 고정이면 항상 클릭 가능, 아니면 투명 영역 통과
-    floatBar.setIgnoreMouseEvents(!pinned, { forward: true });
+    if (pinned) {
+      floatBar.show();
+      floatBar.setIgnoreMouseEvents(false);
+    } else {
+      floatBar.hide();
+    }
     floatBar.webContents.send('bar-pinned', pinned);
   }
   return true;
 });
-ipcMain.handle('get-bar-pinned', () => store.get('bar-pinned', false));
+ipcMain.handle('get-bar-pinned', () => store.get('bar-pinned', true));
 
 ipcMain.handle('reset-bar-position', () => {
   applyBarPosition('bottom');
