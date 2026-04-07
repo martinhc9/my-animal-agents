@@ -219,9 +219,9 @@ function createFloatBar() {
   const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize;
 
   const defaultBounds = {
-    width: 420, height: 76,
-    x: Math.round(screenWidth / 2 - 210),
-    y: screenHeight - 76,
+    width: 440, height: 84,
+    x: Math.round(screenWidth / 2 - 220),
+    y: screenHeight - 84,
   };
 
   let bounds = defaultBounds;
@@ -312,7 +312,7 @@ function createTray() {
       const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
       store.delete('floatbar-bounds');
       if (floatBar && !floatBar.isDestroyed()) {
-        floatBar.setBounds({ width: 420, height: 100, x: Math.round(sw / 2 - 210), y: sh - 100 });
+        floatBar.setBounds({ width: 440, height: 84, x: Math.round(sw / 2 - 220), y: sh - 84 });
       }
     }},
     { type: 'separator' },
@@ -330,7 +330,7 @@ function createChatWindow(agentId) {
   const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize;
   const barBounds = floatBar && !floatBar.isDestroyed()
     ? floatBar.getBounds()
-    : { x: Math.round(screenWidth / 2 - 210), y: screenHeight - 100, width: 420, height: 100 };
+    : { x: Math.round(screenWidth / 2 - 220), y: screenHeight - 84, width: 440, height: 84 };
   const chatWidth = 400;
   const chatHeight = 520;
   const barPos = store.get('bar-position', 'bottom');
@@ -502,12 +502,12 @@ function applyBarPosition(pos) {
   const isVertical = pos === 'left' || pos === 'right';
 
   if (isVertical) {
-    const w = 80, h = 400;
+    const w = 84, h = 440;
     const x = pos === 'left' ? 0 : sw - w;
     const y = Math.round(sh / 2 - h / 2);
     floatBar.setBounds({ x, y, width: w, height: h });
   } else {
-    const w = 420, h = 76;
+    const w = 440, h = 84;
     const x = Math.round(sw / 2 - w / 2);
     const y = pos === 'top' ? 0 : sh - h;
     floatBar.setBounds({ x, y, width: w, height: h });
