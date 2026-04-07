@@ -13,7 +13,7 @@ const newsCache = { capybara: null };
 
 // Ollama 설정
 const OLLAMA_BASE = 'http://127.0.0.1:11434';
-const DEFAULT_MODEL = 'qwen2.5:7b';
+const DEFAULT_MODEL = 'gemma3:12b';
 let ollamaReady = false;
 
 // --- 다마고치 시스템 ---
