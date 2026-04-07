@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld('api', {
   resetBarPosition: () => ipcRenderer.invoke('reset-bar-position'),
   setBarPosition: (pos) => ipcRenderer.invoke('set-bar-position', pos),
   getBarPosition: () => ipcRenderer.invoke('get-bar-position'),
+  setBarPinned: (v) => ipcRenderer.invoke('set-bar-pinned', v),
+  getBarPinned: () => ipcRenderer.invoke('get-bar-pinned'),
   // 다마고치
   getAffinity: (agentId) => ipcRenderer.invoke('get-affinity', agentId),
   getAllAffinities: () => ipcRenderer.invoke('get-all-affinities'),
@@ -26,6 +28,7 @@ contextBridge.exposeInMainWorld('api', {
   pickAgentImage: (agentId) => ipcRenderer.invoke('pick-agent-image', agentId),
   getDefaultRole: (agentId) => ipcRenderer.invoke('get-default-role', agentId),
   onBarLayout: (callback) => ipcRenderer.on('bar-layout', (_, layout) => callback(layout)),
+  onBarPinned: (callback) => ipcRenderer.on('bar-pinned', (_, v) => callback(v)),
   // Ollama 상태
   getLlmStatus: () => ipcRenderer.invoke('get-llm-status'),
   getPendingChat: (agentId) => ipcRenderer.invoke('get-pending-chat', agentId),

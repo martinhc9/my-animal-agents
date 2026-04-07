@@ -253,7 +253,8 @@ function createFloatBar() {
 
   floatBar.loadFile(path.join(__dirname, 'renderer', 'float-bar.html'));
   floatBar.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  floatBar.setIgnoreMouseEvents(true, { forward: true });
+  const pinned = store.get('bar-pinned', false);
+  floatBar.setIgnoreMouseEvents(!pinned, { forward: true });
 
   const saveBounds = () => {
     if (floatBar && !floatBar.isDestroyed()) {
@@ -501,6 +502,17 @@ function applyBarPosition(pos) {
 
 ipcMain.handle('set-bar-position', (_, pos) => { applyBarPosition(pos); return true; });
 ipcMain.handle('get-bar-position', () => store.get('bar-position', 'bottom'));
+
+ipcMain.handle('set-bar-pinned', (_, pinned) => {
+  store.set('bar-pinned', pinned);
+  if (floatBar && !floatBar.isDestroyed()) {
+    // 고정이면 항상 클릭 가능, 아니면 투명 영역 통과
+    floatBar.setIgnoreMouseEvents(!pinned, { forward: true });
+    floatBar.webContents.send('bar-pinned', pinned);
+  }
+  return true;
+});
+ipcMain.handle('get-bar-pinned', () => store.get('bar-pinned', false));
 
 ipcMain.handle('reset-bar-position', () => {
   applyBarPosition('bottom');

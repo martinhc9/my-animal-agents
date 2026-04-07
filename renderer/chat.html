@@ -285,6 +285,16 @@
       <div style="font-size:40px;margin-bottom:8px;">🐾</div>
       <h2>에이전트 설정</h2>
       <div id="model-status" style="font-size:13px;min-height:20px;text-align:center;margin-bottom:8px;"></div>
+      <div style="width:100%;display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <span style="font-size:12px;font-weight:600;color:var(--text-secondary);">항상 표시</span>
+        <button id="pin-toggle" style="
+          width:44px;height:24px;border-radius:12px;border:none;cursor:pointer;
+          position:relative;transition:background 0.2s;
+        "><span style="
+          width:20px;height:20px;border-radius:50%;background:white;
+          position:absolute;top:2px;transition:left 0.2s;
+        "></span></button>
+      </div>
       <div style="width:100%;font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">바 위치</div>
       <div style="width:100%;display:grid;grid-template-columns:1fr 1fr;gap:6px;" id="position-grid">
         <button class="pos-btn" data-pos="top" style="padding:10px;border-radius:10px;border:1px solid var(--border);background:transparent;color:var(--text-secondary);cursor:pointer;font-size:12px;">위</button>
@@ -374,10 +384,12 @@
         $('#chat-view').classList.add('hidden');
         $('#settings-view').classList.remove('hidden');
 
-        const [status, barPos] = await Promise.all([
+        const [status, barPos, pinned] = await Promise.all([
           window.api.getLlmStatus(),
           window.api.getBarPosition(),
+          window.api.getBarPinned(),
         ]);
+        updatePinUI(pinned);
         if (status.ready) {
           $('#model-status').textContent = 'AI 정상 작동 중';
           $('#model-status').style.color = '#10b981';
@@ -455,6 +467,19 @@
       e.preventDefault();
       e.stopPropagation();
       window.api.closeChat();
+    });
+
+    // 핀(고정) 토글
+    const pinBtn = $('#pin-toggle');
+    function updatePinUI(pinned) {
+      pinBtn.style.background = pinned ? '#10b981' : 'rgba(255,255,255,0.15)';
+      pinBtn.querySelector('span').style.left = pinned ? '22px' : '2px';
+    }
+    pinBtn.addEventListener('mousedown', async (e) => {
+      e.preventDefault();
+      const current = await window.api.getBarPinned();
+      await window.api.setBarPinned(!current);
+      updatePinUI(!current);
     });
 
     // 바 위치 설정
