@@ -233,6 +233,9 @@ function createFloatBar() {
     store.delete('floatbar-bounds');
   }
 
+  const barPos = store.get('bar-position', 'bottom');
+  const isVertical = barPos === 'left' || barPos === 'right';
+
   floatBar = new BrowserWindow({
     ...bounds,
     frame: false,
@@ -311,8 +314,23 @@ function createChatWindow(agentId) {
     : { x: Math.round(screenWidth / 2 - 210), y: screenHeight - 100, width: 420, height: 100 };
   const chatWidth = 400;
   const chatHeight = 520;
-  const chatX = Math.max(0, Math.min(screenWidth - chatWidth, Math.round(barBounds.x + barBounds.width / 2 - chatWidth / 2)));
-  const chatY = Math.max(10, barBounds.y - chatHeight - 10);
+  const barPos = store.get('bar-position', 'bottom');
+  let chatX, chatY;
+  if (barPos === 'left') {
+    chatX = barBounds.x + barBounds.width + 10;
+    chatY = Math.round(barBounds.y + barBounds.height / 2 - chatHeight / 2);
+  } else if (barPos === 'right') {
+    chatX = barBounds.x - chatWidth - 10;
+    chatY = Math.round(barBounds.y + barBounds.height / 2 - chatHeight / 2);
+  } else if (barPos === 'top') {
+    chatX = Math.round(barBounds.x + barBounds.width / 2 - chatWidth / 2);
+    chatY = barBounds.y + barBounds.height + 10;
+  } else {
+    chatX = Math.round(barBounds.x + barBounds.width / 2 - chatWidth / 2);
+    chatY = barBounds.y - chatHeight - 10;
+  }
+  chatX = Math.max(0, Math.min(screenWidth - chatWidth, chatX));
+  chatY = Math.max(10, Math.min(screenHeight - chatHeight, chatY));
 
   chatWindow = new BrowserWindow({
     width: chatWidth,
@@ -459,12 +477,33 @@ ipcMain.handle('drag-end', () => {
   store.set('floatbar-bounds', floatBar.getBounds());
 });
 
-ipcMain.handle('reset-bar-position', () => {
+function applyBarPosition(pos) {
+  if (!floatBar || floatBar.isDestroyed()) return;
   const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
-  store.delete('floatbar-bounds');
-  if (floatBar && !floatBar.isDestroyed()) {
-    floatBar.setBounds({ width: 420, height: 100, x: Math.round(sw / 2 - 210), y: sh - 100 });
+  const isVertical = pos === 'left' || pos === 'right';
+
+  if (isVertical) {
+    const w = 100, h = 420;
+    const x = pos === 'left' ? 0 : sw - w;
+    const y = Math.round(sh / 2 - h / 2);
+    floatBar.setBounds({ x, y, width: w, height: h });
+  } else {
+    const w = 420, h = 100;
+    const x = Math.round(sw / 2 - w / 2);
+    const y = pos === 'top' ? 0 : sh - h;
+    floatBar.setBounds({ x, y, width: w, height: h });
   }
+
+  store.set('bar-position', pos);
+  store.set('floatbar-bounds', floatBar.getBounds());
+  floatBar.webContents.send('bar-layout', isVertical ? 'vertical' : 'horizontal');
+}
+
+ipcMain.handle('set-bar-position', (_, pos) => { applyBarPosition(pos); return true; });
+ipcMain.handle('get-bar-position', () => store.get('bar-position', 'bottom'));
+
+ipcMain.handle('reset-bar-position', () => {
+  applyBarPosition('bottom');
   return true;
 });
 

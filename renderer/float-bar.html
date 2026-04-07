@@ -142,6 +142,33 @@
       transform: rotate(45deg);
     }
 
+    /* 수직 모드 (설정에서 좌/우 선택 시) */
+    body.vertical .bar {
+      flex-direction: column;
+      padding: 18px 10px;
+      margin: auto 6px;
+      transform: translateX(0);
+      opacity: 1;
+    }
+    body.vertical .agent-btn::after {
+      top: 50%; left: calc(100% + 8px); right: auto;
+      transform: translateY(-50%);
+    }
+    body.vertical .settings-btn {
+      margin-left: 0; margin-top: 4px;
+    }
+
+    /* 위쪽 모드 */
+    body.top-mode {
+      justify-content: flex-start;
+    }
+    body.top-mode .bar {
+      transform: translateY(-80px);
+      margin: 6px auto 0;
+    }
+    body.top-mode:hover .bar {
+      transform: translateY(0);
+    }
   </style>
 </head>
 <body>
@@ -324,6 +351,19 @@
         }
       });
     })();
+
+    // 레이아웃 변경 리스너
+    window.api.onBarLayout((layout) => {
+      document.body.classList.remove('vertical', 'top-mode');
+      if (layout === 'vertical') document.body.classList.add('vertical');
+    });
+
+    // 시작 시 저장된 위치에 맞는 레이아웃 적용
+    window.api.getBarPosition().then(pos => {
+      document.body.classList.remove('vertical', 'top-mode');
+      if (pos === 'left' || pos === 'right') document.body.classList.add('vertical');
+      if (pos === 'top') document.body.classList.add('top-mode');
+    });
 
     buildBar();
   </script>

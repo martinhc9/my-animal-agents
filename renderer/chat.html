@@ -284,8 +284,15 @@
     <div id="settings-view" class="settings-view hidden">
       <div style="font-size:40px;margin-bottom:8px;">🐾</div>
       <h2>에이전트 설정</h2>
-      <div id="model-status" style="font-size:13px;min-height:20px;text-align:center;"></div>
-      <button class="btn-settings-close" id="settings-close">닫기</button>
+      <div id="model-status" style="font-size:13px;min-height:20px;text-align:center;margin-bottom:8px;"></div>
+      <div style="width:100%;font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">바 위치</div>
+      <div style="width:100%;display:grid;grid-template-columns:1fr 1fr;gap:6px;" id="position-grid">
+        <button class="pos-btn" data-pos="top" style="padding:10px;border-radius:10px;border:1px solid var(--border);background:transparent;color:var(--text-secondary);cursor:pointer;font-size:12px;">위</button>
+        <button class="pos-btn" data-pos="bottom" style="padding:10px;border-radius:10px;border:1px solid var(--border);background:transparent;color:var(--text-secondary);cursor:pointer;font-size:12px;">아래</button>
+        <button class="pos-btn" data-pos="left" style="padding:10px;border-radius:10px;border:1px solid var(--border);background:transparent;color:var(--text-secondary);cursor:pointer;font-size:12px;">왼쪽 (세로)</button>
+        <button class="pos-btn" data-pos="right" style="padding:10px;border-radius:10px;border:1px solid var(--border);background:transparent;color:var(--text-secondary);cursor:pointer;font-size:12px;">오른쪽 (세로)</button>
+      </div>
+      <button class="btn-settings-close" id="settings-close" style="margin-top:12px;">닫기</button>
     </div>
   </div>
 
@@ -367,7 +374,10 @@
         $('#chat-view').classList.add('hidden');
         $('#settings-view').classList.remove('hidden');
 
-        const status = await window.api.getLlmStatus();
+        const [status, barPos] = await Promise.all([
+          window.api.getLlmStatus(),
+          window.api.getBarPosition(),
+        ]);
         if (status.ready) {
           $('#model-status').textContent = 'AI 정상 작동 중';
           $('#model-status').style.color = '#10b981';
@@ -375,6 +385,14 @@
           $('#model-status').textContent = 'AI 연결 안 됨';
           $('#model-status').style.color = '#f87171';
         }
+        // 현재 위치 하이라이트
+        document.querySelectorAll('.pos-btn').forEach(b => {
+          if (b.dataset.pos === barPos) {
+            b.style.background = 'var(--accent)';
+            b.style.color = 'white';
+            b.style.borderColor = 'var(--accent)';
+          }
+        });
         return;
       }
 
@@ -437,6 +455,24 @@
       e.preventDefault();
       e.stopPropagation();
       window.api.closeChat();
+    });
+
+    // 바 위치 설정
+    document.querySelectorAll('.pos-btn').forEach(btn => {
+      btn.addEventListener('mousedown', async (e) => {
+        e.preventDefault();
+        const pos = btn.dataset.pos;
+        await window.api.setBarPosition(pos);
+        // 선택된 버튼 하이라이트
+        document.querySelectorAll('.pos-btn').forEach(b => {
+          b.style.background = 'transparent';
+          b.style.color = 'var(--text-secondary)';
+          b.style.borderColor = 'var(--border)';
+        });
+        btn.style.background = 'var(--accent)';
+        btn.style.color = 'white';
+        btn.style.borderColor = 'var(--accent)';
+      });
     });
 
     $('#settings-close').addEventListener('mousedown', (e) => {
