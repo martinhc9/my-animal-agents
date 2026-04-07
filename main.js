@@ -112,6 +112,36 @@ AI: ${assistantResponse}
   } catch { /* 메모리 추출 실패해도 무시 */ }
 }
 
+// --- 응답 프리캐시 (카피바라 제외) ---
+// 각 캐릭터별 미리 생성된 응답 3개씩 보관
+const responseCache = new Map(); // agentId → [string, string, string]
+
+async function prefillCache(agentId) {
+  if (agentId === 'capybara') return; // 실시간 데이터라 캐싱 불가
+  const cache = responseCache.get(agentId) || [];
+  if (cache.length >= 3) return; // 이미 충분
+
+  const needed = 3 - cache.length;
+  console.log(`[Cache] ${agentId}: ${needed}개 프리캐시 시작`);
+
+  const prompts = {
+    panda: '재미있는 퀴즈 하나 내줘. 4지선다로.',
+    monkey: '오늘 힘든 하루를 보낸 사람에게 위로 한마디 해줘.',
+    cat: '기분 좋아지는 노래 3곡 추천해줘. 유튜브 링크도.',
+    nureong: '진짜 웃긴 일상 이야기 하나 들려줘. 컬투쇼 사연 느낌으로.',
+  };
+
+  for (let i = 0; i < needed; i++) {
+    try {
+      const systemPrompt = await buildSystemPrompt(agentId);
+      const content = await ollamaChat(systemPrompt, [{ role: 'user', content: prompts[agentId] || '안녕' }]);
+      cache.push(content);
+      responseCache.set(agentId, cache);
+      console.log(`[Cache] ${agentId}: ${cache.length}/3`);
+    } catch { break; }
+  }
+}
+
 // --- Ollama API ---
 async function ollamaChat(systemPrompt, messages, onToken) {
   const body = {
@@ -347,7 +377,7 @@ function createChatWindow(agentId) {
 
   chatWindow.on('closed', () => {
     chatWindow = null;
-    newsCache.capybara = null;
+    // 트렌드 캐시는 앱 세션 동안 유지 (창 닫아도 초기화 안 함)
   });
 }
 
@@ -367,9 +397,16 @@ app.whenReady().then(async () => {
       await fetch(`${OLLAMA_BASE}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: DEFAULT_MODEL, messages: [{ role: 'user', content: 'hi' }], stream: false }),
+        body: JSON.stringify({ model: DEFAULT_MODEL, messages: [{ role: 'user', content: '안녕' }], stream: false, think: false, options: { num_predict: 5 } }),
       });
       console.log('[Ollama] 워밍업 완료');
+      // 백그라운드 프리캐시
+      (async () => {
+        for (const id of ['panda', 'monkey', 'cat', 'nureong']) {
+          await prefillCache(id);
+        }
+        console.log('[Cache] 프리캐시 완료');
+      })();
     } catch { console.log('[Ollama] 워밍업 실패'); }
   }
 });
@@ -610,7 +647,28 @@ ipcMain.handle('chat', async (_, { agent, messages }) => {
     }
   }
 
-  // 백그라운드에서 Ollama 호출 — 창 닫혀도 계속 진행
+  // 캐시에 미리 생성된 응답이 있으면 즉시 사용 (첫 메시지일 때)
+  const cache = responseCache.get(agent) || [];
+  if (cache.length > 0 && messages.length <= 2) {
+    const cached = cache.shift();
+    responseCache.set(agent, cache);
+    // 캐시 보충 (백그라운드)
+    prefillCache(agent);
+
+    pendingChats.set(agent, { status: 'done', content: cached });
+    addXP(agent);
+    const saved = store.get(historyKey, []);
+    saved.push({ role: 'assistant', content: cached });
+    store.set(historyKey, saved);
+    if (chatWindow && !chatWindow.isDestroyed()) {
+      chatWindow.webContents.send('chat-response', { agent, content: cached });
+    }
+    const userMsg = lastUserMsg?.content || '';
+    if (userMsg) extractMemory(agent, userMsg, cached);
+    return { status: 'processing' };
+  }
+
+  // 캐시 없으면 실시간 생성
   pendingChats.set(agent, { status: 'loading' });
 
   (async () => {
