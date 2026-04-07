@@ -117,9 +117,8 @@ AI: ${assistantResponse}
 const responseCache = new Map(); // agentId → [string, string, string]
 
 async function prefillCache(agentId) {
-  if (agentId === 'capybara') return; // 실시간 데이터라 캐싱 불가
   const cache = responseCache.get(agentId) || [];
-  if (cache.length >= 3) return; // 이미 충분
+  if (cache.length >= 3) return;
 
   const needed = 3 - cache.length;
   console.log(`[Cache] ${agentId}: ${needed}개 프리캐시 시작`);
@@ -128,6 +127,7 @@ async function prefillCache(agentId) {
     panda: '재미있는 퀴즈 하나 내줘. 4지선다로.',
     monkey: '오늘 힘든 하루를 보낸 사람에게 위로 한마디 해줘.',
     cat: '기분 좋아지는 노래 3곡 추천해줘. 유튜브 링크도.',
+    capybara: '지금 뭐가 핫해?',
     nureong: '진짜 웃긴 일상 이야기 하나 들려줘. 컬투쇼 사연 느낌으로.',
   };
 
@@ -402,7 +402,7 @@ app.whenReady().then(async () => {
       console.log('[Ollama] 워밍업 완료');
       // 백그라운드 프리캐시
       (async () => {
-        for (const id of ['panda', 'monkey', 'cat', 'nureong']) {
+        for (const id of ['panda', 'monkey', 'cat', 'capybara', 'nureong']) {
           await prefillCache(id);
         }
         console.log('[Cache] 프리캐시 완료');
