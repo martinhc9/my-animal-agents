@@ -422,22 +422,30 @@ ipcMain.handle('get-llm-status', async () => {
   return { ready: ollamaReady, model: DEFAULT_MODEL };
 });
 
-// --- RSS 뉴스 (카피바라용) ---
-async function fetchTrendNews() {
+// --- 실시간 트렌드 (Google Trends 한국) ---
+async function fetchRealtimeTrends() {
   try {
-    const queries = ['트렌드+화제+2026', '핫이슈+화제', 'MZ세대+트렌드+핫'];
-    const query = queries[Math.floor(Math.random() * queries.length)];
-    const res = await fetch(`https://news.google.com/rss/search?q=${query}&hl=ko&gl=KR&ceid=KR:ko`);
+    const res = await fetch('https://trends.google.co.kr/trending/rss?geo=KR');
     const xml = await res.text();
     const items = [];
     const re = /<item>([\s\S]*?)<\/item>/g;
     let m;
-    while ((m = re.exec(xml)) !== null && items.length < 8) {
+    while ((m = re.exec(xml)) !== null && items.length < 10) {
       const x = m[1];
-      const title = (x.match(/<title>([\s\S]*?)<\/title>/) || [])[1] || '';
-      const link = (x.match(/<link>([\s\S]*?)<\/link>/) || [])[1] || '';
-      const source = (x.match(/<source[^>]*>([\s\S]*?)<\/source>/) || [])[1] || '';
-      if (title) items.push({ title: title.replace(/<!\[CDATA\[|\]\]>/g, '').trim(), link, source });
+      const keyword = (x.match(/<title>([\s\S]*?)<\/title>/) || [])[1] || '';
+      const traffic = (x.match(/<ht:approx_traffic>([\s\S]*?)<\/ht:approx_traffic>/) || [])[1] || '';
+      const newsTitle = (x.match(/<ht:news_item_title>([\s\S]*?)<\/ht:news_item_title>/) || [])[1] || '';
+      const newsUrl = (x.match(/<ht:news_item_url>([\s\S]*?)<\/ht:news_item_url>/) || [])[1] || '';
+      const newsSource = (x.match(/<ht:news_item_source>([\s\S]*?)<\/ht:news_item_source>/) || [])[1] || '';
+      if (keyword) {
+        items.push({
+          keyword: keyword.replace(/<!\[CDATA\[|\]\]>/g, '').replace(/&apos;/g, "'").replace(/&amp;/g, '&').trim(),
+          traffic,
+          newsTitle: newsTitle.replace(/<!\[CDATA\[|\]\]>/g, '').replace(/&apos;/g, "'").replace(/&amp;/g, '&').replace(/&quot;/g, '"').trim(),
+          newsUrl: newsUrl.replace(/&amp;/g, '&'),
+          newsSource,
+        });
+      }
     }
     return items;
   } catch { return []; }
@@ -471,12 +479,12 @@ async function buildSystemPrompt(agent) {
   // 판다는 게임 대결로 변경됨 — HR 뉴스 fetch 불필요
 
   if (agent === 'capybara') {
-    if (!newsCache.capybara) newsCache.capybara = await fetchTrendNews();
-    const trendNews = newsCache.capybara;
-    const trendText = trendNews.length > 0
-      ? trendNews.map((n, i) => `${i+1}. [${n.source}] ${n.title}\n   ${n.link}`).join('\n')
-      : '(트렌드를 가져오지 못했어요.)';
-    prompts.capybara = `너는 "카피바라"라는 이름의 실시간 핫이슈 알리미야. 느긋하지만 트렌드에 빠른 캐릭터.\n역할: 오늘 바로 지금 인스타, X, 커뮤니티에서 핫한 밈/화제/이슈를 알려줘.\n오늘: ${today}${ctx}\n🔥 검색된 실시간 이슈:\n${trendText}\n위 뉴스를 참고하되, 인스타/X에서 핫한 밈이나 화제도 섞어서 알려줘. 한국어로 답변해.`;
+    if (!newsCache.capybara) newsCache.capybara = await fetchRealtimeTrends();
+    const trends = newsCache.capybara;
+    const trendText = trends.length > 0
+      ? trends.map((t, i) => `${i+1}. "${t.keyword}" (검색량: ${t.traffic})\n   관련: ${t.newsTitle}\n   ${t.newsUrl}`).join('\n')
+      : '(실시간 트렌드를 가져오지 못했어요.)';
+    prompts.capybara = `너는 "카피바라"라는 이름의 실시간 핫이슈 알리미야. 느긋하지만 트렌드에 빠른 캐릭터.\n역할: 지금 한국에서 실시간으로 뜨고 있는 키워드와 이슈를 알려줘.\n오늘: ${today}${ctx}\n🔥 지금 실시간 인기 검색어 (Google Trends 한국):\n${trendText}\n\n위 실시간 키워드를 바탕으로 재밌게 설명해줘. 왜 핫한지, 무슨 일인지. 한국어로 답변해.`;
   }
 
   return prompts[agent] || prompts.panda;
