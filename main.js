@@ -121,10 +121,11 @@ async function ollamaChat(systemPrompt, messages) {
       ...messages,
     ],
     stream: false,
+    think: false,
     options: {
       temperature: 0.7,
       top_p: 0.9,
-      num_predict: 1024,
+      num_predict: 512,
     },
   };
 
