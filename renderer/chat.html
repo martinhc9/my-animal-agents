@@ -282,10 +282,9 @@
     </div>
 
     <div id="settings-view" class="settings-view hidden">
-      <div style="font-size:40px;margin-bottom:8px;">🧠</div>
-      <h2>AI 엔진</h2>
-      <p style="color:var(--text-secondary);font-size:11px;">Ollama (qwen2.5:7b)<br>로컬에서 실행됩니다.</p>
-      <div id="model-status" style="color:var(--text-secondary);font-size:12px;min-height:20px;text-align:center;"></div>
+      <div style="font-size:40px;margin-bottom:8px;">🐾</div>
+      <h2>에이전트 설정</h2>
+      <div id="model-status" style="font-size:13px;min-height:20px;text-align:center;"></div>
       <button class="btn-settings-close" id="settings-close">닫기</button>
     </div>
   </div>
@@ -370,10 +369,10 @@
 
         const status = await window.api.getLlmStatus();
         if (status.ready) {
-          $('#model-status').textContent = '연결됨: ' + (status.model || '');
+          $('#model-status').textContent = 'AI 정상 작동 중';
           $('#model-status').style.color = '#10b981';
         } else {
-          $('#model-status').textContent = 'Ollama 연결 안 됨. "ollama serve" 실행 필요';
+          $('#model-status').textContent = 'AI 연결 안 됨';
           $('#model-status').style.color = '#f87171';
         }
         return;

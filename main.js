@@ -350,14 +350,19 @@ ipcMain.handle('drag-end', () => {
 
   const prev = store.get('floatbar-orientation', 'horizontal');
   if (orientation !== prev) {
+    const { height: sh } = screen.getPrimaryDisplay().workAreaSize;
     if (orientation === 'horizontal') {
       floatBar.setMinimumSize(200, 80);
       floatBar.setMaximumSize(9999, 120);
-      floatBar.setSize(420, 100);
+      floatBar.setBounds({ x: bounds.x, y: sh - 100, width: 420, height: 100 });
+    } else if (orientation === 'vertical-left') {
+      floatBar.setMinimumSize(80, 200);
+      floatBar.setMaximumSize(120, 9999);
+      floatBar.setBounds({ x: 0, y: Math.round(sh / 2 - 210), width: 100, height: 420 });
     } else {
       floatBar.setMinimumSize(80, 200);
       floatBar.setMaximumSize(120, 9999);
-      floatBar.setSize(100, 420);
+      floatBar.setBounds({ x: sw - 100, y: Math.round(sh / 2 - 210), width: 100, height: 420 });
     }
     store.set('floatbar-orientation', orientation);
     floatBar.webContents.send('orientation-change', orientation);
