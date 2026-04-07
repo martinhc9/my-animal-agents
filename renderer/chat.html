@@ -405,7 +405,7 @@
       $('#chat-view').classList.remove('hidden');
       $('#settings-view').classList.add('hidden');
 
-      setTimeout(() => $('#input').focus(), 150);
+      setTimeout(() => { $('#input').focus(); checkPending(); }, 150);
     }
 
     // Read agent from URL query parameter
@@ -479,7 +479,7 @@
       $('#agent-config').classList.add('hidden');
     });
 
-    // Send message
+    // Send message — main에서 비동기 처리, 창 닫혀도 응답 보장
     async function sendMessage() {
       const text = $('#input').value.trim();
       if (!text || !currentAgent || isSending) return;
@@ -497,26 +497,34 @@
       history.push(loadingMsg);
       renderMessages();
 
-      try {
-        const apiMessages = history
-          .filter(m => !m.loading)
-          .slice(-20)
-          .map(m => ({ role: m.role, content: m.content }));
+      const apiMessages = history
+        .filter(m => !m.loading)
+        .slice(-20)
+        .map(m => ({ role: m.role, content: m.content }));
 
-        const response = await window.api.chat(currentAgent, apiMessages);
+      const result = await window.api.chat(currentAgent, apiMessages);
+
+      if (result.status === 'error') {
         const idx = history.indexOf(loadingMsg);
         if (idx !== -1) history.splice(idx, 1);
-        history.push({ role: 'assistant', content: response });
-      } catch (err) {
-        const idx = history.indexOf(loadingMsg);
-        if (idx !== -1) history.splice(idx, 1);
-        history.push({ role: 'assistant', content: err.message || '오류가 발생했어요.', error: true });
+        history.push({ role: 'assistant', content: result.error, error: true });
+        renderMessages();
+        isSending = false;
+        $('#send-btn').disabled = false;
+        return;
       }
 
-      renderMessages();
-      // main에서 이미 히스토리 저장됨 — 최신 상태를 리로드
-      const latestHistory = await window.api.loadHistory(currentAgent);
-      if (latestHistory) history = latestHistory;
+      // status === 'processing' — main에서 백그라운드 처리 중
+      // 응답은 onChatResponse로 받음
+    }
+
+    // main에서 응답이 오면 처리
+    window.api.onChatResponse(async (data) => {
+      if (data.agent !== currentAgent) return;
+
+      // 로딩 메시지 제거 후 히스토리를 main에서 리로드
+      const latest = await window.api.loadHistory(currentAgent);
+      if (latest) history = latest;
       renderMessages();
 
       const [newAffinity, newCustom] = await Promise.all([
@@ -530,6 +538,16 @@
       isSending = false;
       $('#send-btn').disabled = false;
       $('#input').focus();
+    });
+
+    // 창 열었을 때 pending 응답 확인 (이전에 닫혀서 못 받은 경우)
+    async function checkPending() {
+      if (!currentAgent) return;
+      const pending = await window.api.getPendingChat(currentAgent);
+      if (pending && pending.status === 'done') {
+        const latest = await window.api.loadHistory(currentAgent);
+        if (latest) { history = latest; renderMessages(); }
+      }
     }
 
     $('#send-btn').addEventListener('click', sendMessage);

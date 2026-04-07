@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, nativeImage, ipcMain, screen, shell, protocol, dialog } = require('electron');
+const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, screen, shell, protocol, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const Store = require('electron-store');
@@ -179,6 +179,25 @@ function createTray() {
   tray = new Tray(trayImage);
   tray.setToolTip('My Agents');
   if (trayImage.isEmpty()) tray.setTitle('🐾');
+
+  const trayMenu = Menu.buildFromTemplate([
+    { label: '설정', click: () => createChatWindow('settings') },
+    { label: '원위치 복귀', click: () => {
+      const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
+      const bounds = { width: 420, height: 100, x: Math.round(sw / 2 - 210), y: sh - 100 };
+      store.delete('floatbar-bounds');
+      store.delete('floatbar-orientation');
+      if (floatBar && !floatBar.isDestroyed()) {
+        floatBar.setMinimumSize(200, 80);
+        floatBar.setMaximumSize(9999, 120);
+        floatBar.setBounds(bounds);
+        floatBar.webContents.send('orientation-change', 'horizontal');
+      }
+    }},
+    { type: 'separator' },
+    { label: '종료', click: () => { app.quit(); } },
+  ]);
+  tray.setContextMenu(trayMenu);
 }
 
 function createChatWindow(agentId) {
@@ -313,7 +332,34 @@ ipcMain.handle('set-mouse-through', (_, through) => {
 ipcMain.handle('move-bar-by', (_, dx, dy) => {
   if (floatBar && !floatBar.isDestroyed()) {
     const [x, y] = floatBar.getPosition();
-    floatBar.setPosition(x + dx, y + dy);
+    const newX = x + dx;
+    const newY = y + dy;
+    floatBar.setPosition(newX, newY);
+
+    // 화면 가장자리 감지 → 수직/수평 전환
+    const { width: sw } = screen.getPrimaryDisplay().workAreaSize;
+    const bounds = floatBar.getBounds();
+    const EDGE = 60;
+    let orientation = 'horizontal';
+    if (newX <= EDGE) orientation = 'vertical-left';
+    else if (newX + bounds.width >= sw - EDGE) orientation = 'vertical-right';
+
+    // 방향에 따라 윈도우 크기 조정
+    const prevOrientation = store.get('floatbar-orientation', 'horizontal');
+    if (orientation !== prevOrientation) {
+      if (orientation === 'horizontal') {
+        floatBar.setMinimumSize(200, 80);
+        floatBar.setMaximumSize(9999, 120);
+        floatBar.setSize(420, 100);
+      } else {
+        floatBar.setMinimumSize(80, 200);
+        floatBar.setMaximumSize(120, 9999);
+        floatBar.setSize(100, 420);
+      }
+      store.set('floatbar-orientation', orientation);
+      floatBar.webContents.send('orientation-change', orientation);
+    }
+
     store.set('floatbar-bounds', floatBar.getBounds());
   }
 });
@@ -432,36 +478,62 @@ async function buildSystemPrompt(agent) {
   return prompts[agent] || prompts.panda;
 }
 
-// --- Chat handler (Ollama) — 창이 닫혀도 응답 완료 후 히스토리 저장 ---
-ipcMain.handle('chat', async (_, { agent, messages }) => {
+// --- Chat handler (Ollama) — 비동기 처리, 창 닫혀도 완료 보장 ---
+// 진행 중인 채팅 추적
+const pendingChats = new Map(); // agentId → { status, content, error }
+
+ipcMain.handle('chat', (_, { agent, messages }) => {
   if (!ollamaReady) {
-    await checkOllama();
+    checkOllama();
     if (!ollamaReady) {
-      throw new Error('Ollama가 실행 중이 아니에요. 터미널에서 "ollama serve"를 실행해주세요.');
+      return { status: 'error', error: 'Ollama가 실행 중이 아니에요. 터미널에서 "ollama serve"를 실행해주세요.' };
     }
   }
 
-  const systemPrompt = await buildSystemPrompt(agent);
-  addXP(agent);
-
-  // 응답을 main에서 직접 처리 — 창 닫혀도 히스토리에 저장
-  const content = await ollamaChat(systemPrompt, messages);
-
-  // 응답을 히스토리에 즉시 저장 (렌더러가 살아있든 없든)
+  // 유저 메시지를 즉시 히스토리에 저장
   const today = new Date().toISOString().split('T')[0];
   const historyKey = `history-${agent}-${today}`;
-  const savedHistory = store.get(historyKey, []);
-  // 마지막 메시지가 이 user 메시지와 일치하면 assistant 응답 추가
   const lastUserMsg = messages[messages.length - 1];
   if (lastUserMsg && lastUserMsg.role === 'user') {
-    // 히스토리에 user 메시지가 아직 없으면 추가
-    const hasUser = savedHistory.some(m => m.role === 'user' && m.content === lastUserMsg.content);
-    if (!hasUser) savedHistory.push({ role: 'user', content: lastUserMsg.content });
+    const saved = store.get(historyKey, []);
+    const already = saved.length > 0 && saved[saved.length - 1].content === lastUserMsg.content;
+    if (!already) {
+      saved.push({ role: 'user', content: lastUserMsg.content });
+      store.set(historyKey, saved);
+    }
   }
-  savedHistory.push({ role: 'assistant', content });
-  store.set(historyKey, savedHistory);
 
-  return content;
+  // 백그라운드에서 Ollama 호출 — 창 닫혀도 계속 진행
+  pendingChats.set(agent, { status: 'loading' });
+
+  buildSystemPrompt(agent).then(systemPrompt => {
+    return ollamaChat(systemPrompt, messages);
+  }).then(content => {
+    addXP(agent);
+    // 히스토리에 응답 저장
+    const saved = store.get(historyKey, []);
+    saved.push({ role: 'assistant', content });
+    store.set(historyKey, saved);
+    pendingChats.set(agent, { status: 'done', content });
+
+    // 렌더러가 살아있으면 알림
+    if (chatWindow && !chatWindow.isDestroyed()) {
+      chatWindow.webContents.send('chat-response', { agent, content });
+    }
+  }).catch(err => {
+    pendingChats.set(agent, { status: 'error', error: err.message });
+    if (chatWindow && !chatWindow.isDestroyed()) {
+      chatWindow.webContents.send('chat-response', { agent, error: err.message });
+    }
+  });
+
+  return { status: 'processing' };
+});
+
+ipcMain.handle('get-pending-chat', (_, agent) => {
+  const pending = pendingChats.get(agent);
+  if (pending && pending.status === 'done') pendingChats.delete(agent);
+  return pending || null;
 });
 
 app.on('window-all-closed', (e) => {
