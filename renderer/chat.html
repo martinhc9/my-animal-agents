@@ -514,9 +514,11 @@
       }
 
       renderMessages();
-      // Save history + update affinity display
-      const saveable = history.filter(m => !m.loading && !m.error);
-      window.api.saveHistory(currentAgent, saveable);
+      // main에서 이미 히스토리 저장됨 — 최신 상태를 리로드
+      const latestHistory = await window.api.loadHistory(currentAgent);
+      if (latestHistory) history = latestHistory;
+      renderMessages();
+
       const [newAffinity, newCustom] = await Promise.all([
         window.api.getAffinity(currentAgent),
         window.api.getAgentCustom(currentAgent),
