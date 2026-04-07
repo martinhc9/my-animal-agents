@@ -389,7 +389,7 @@
       $('#avatar').src = getAgentImg(agentId, affinity.level);
       $('#avatar').style.background = agentColors[agentId] || 'rgba(255,255,255,0.06)';
       $('#name').textContent = custom?.name || info.name;
-      $('#role').textContent = `${custom?.role || info.role} | Lv.${affinity.level}`;
+      $('#role').textContent = `${info.role} | Lv.${affinity.level}`;
       $('#agent-config').classList.add('hidden');
 
       // Load today's history, or start fresh
@@ -485,7 +485,7 @@
       await window.api.setAgentCustom({ agentId: currentAgent, name, role });
       $('#name').textContent = name;
       const affinity = await window.api.getAffinity(currentAgent);
-      $('#role').textContent = `${role} | Lv.${affinity.level}`;
+      $('#role').textContent = `${agentsInfo[currentAgent].role} | Lv.${affinity.level}`;
       $('#agent-config').classList.add('hidden');
     });
 
@@ -527,7 +527,7 @@
           window.api.getAgentCustom(currentAgent),
         ]);
         $('#avatar').src = getAgentImg(currentAgent, aff.level);
-        $('#role').textContent = `${cust?.role || agentsInfo[currentAgent].role} | Lv.${aff.level}`;
+        $('#role').textContent = `${agentsInfo[currentAgent].role} | Lv.${aff.level}`;
 
         isSending = false;
         $('#send-btn').disabled = false;

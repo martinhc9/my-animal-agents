@@ -13,7 +13,7 @@ const newsCache = { capybara: null };
 
 // Ollama 설정
 const OLLAMA_BASE = 'http://127.0.0.1:11434';
-const DEFAULT_MODEL = 'llama3.1:8b';
+const DEFAULT_MODEL = 'korean-llama';
 let ollamaReady = false;
 
 // --- 다마고치 시스템 ---
