@@ -142,47 +142,6 @@
       transform: rotate(45deg);
     }
 
-    /* 수직 모드 */
-    body.vertical {
-      justify-content: center;
-    }
-    body.vertical .bar {
-      flex-direction: column;
-      padding: 18px 10px;
-      margin: auto 6px;
-      border-radius: 24px;
-      transform: translateX(80px);
-    }
-    body.vertical-left .bar {
-      transform: translateX(-80px);
-    }
-    body.vertical:hover .bar {
-      transform: translateX(0);
-      opacity: 1;
-    }
-    body.vertical .agent-btn:hover {
-      transform: translateX(-4px) scale(1.15);
-    }
-    body.vertical .agent-btn:active {
-      transform: translateX(-2px) scale(1.06);
-    }
-    body.vertical .agent-btn::after {
-      top: 50%;
-      left: auto;
-      right: calc(100% + 8px);
-      transform: translateY(-50%);
-    }
-    body.vertical-left .agent-btn::after {
-      right: auto;
-      left: calc(100% + 8px);
-    }
-    body.vertical-left .agent-btn:hover {
-      transform: translateX(4px) scale(1.15);
-    }
-    body.vertical .settings-btn {
-      margin-left: 0;
-      margin-top: 4px;
-    }
   </style>
 </head>
 <body>
@@ -365,16 +324,6 @@
         }
       });
     })();
-
-    // 수직/수평 전환 리스너
-    window.api.onOrientationChange((orientation) => {
-      document.body.classList.remove('vertical', 'vertical-left');
-      if (orientation === 'vertical-left') {
-        document.body.classList.add('vertical', 'vertical-left');
-      } else if (orientation === 'vertical-right') {
-        document.body.classList.add('vertical');
-      }
-    });
 
     buildBar();
   </script>

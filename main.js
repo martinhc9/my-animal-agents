@@ -233,19 +233,14 @@ function createFloatBar() {
     store.delete('floatbar-bounds');
   }
 
-  const savedOrientation = store.get('floatbar-orientation', 'horizontal');
-  const isVertical = savedOrientation !== 'horizontal';
-
   floatBar = new BrowserWindow({
     ...bounds,
     frame: false,
-    resizable: true,
+    resizable: false,
     alwaysOnTop: true,
     skipTaskbar: true,
     transparent: true,
     hasShadow: false,
-    minWidth: isVertical ? 80 : 200,
-    minHeight: isVertical ? 200 : 80,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -274,10 +269,6 @@ function createFloatBar() {
         window.api.setMouseThrough(true);
       });
     `);
-    // 저장된 수직/수평 모드 복원
-    if (savedOrientation !== 'horizontal') {
-      floatBar.webContents.send('orientation-change', savedOrientation);
-    }
   });
 }
 
@@ -297,14 +288,9 @@ function createTray() {
     { label: '설정', click: () => createChatWindow('settings') },
     { label: '원위치 복귀', click: () => {
       const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
-      const bounds = { width: 420, height: 100, x: Math.round(sw / 2 - 210), y: sh - 100 };
       store.delete('floatbar-bounds');
-      store.delete('floatbar-orientation');
       if (floatBar && !floatBar.isDestroyed()) {
-        floatBar.setMinimumSize(200, 80);
-        floatBar.setMaximumSize(9999, 120);
-        floatBar.setBounds(bounds);
-        floatBar.webContents.send('orientation-change', 'horizontal');
+        floatBar.setBounds({ width: 420, height: 100, x: Math.round(sw / 2 - 210), y: sh - 100 });
       }
     }},
     { type: 'separator' },
@@ -323,23 +309,10 @@ function createChatWindow(agentId) {
   const barBounds = floatBar && !floatBar.isDestroyed()
     ? floatBar.getBounds()
     : { x: Math.round(screenWidth / 2 - 210), y: screenHeight - 100, width: 420, height: 100 };
-  const orientation = store.get('floatbar-orientation', 'horizontal');
   const chatWidth = 400;
   const chatHeight = 520;
-
-  let chatX, chatY;
-  if (orientation === 'vertical-left') {
-    chatX = barBounds.x + barBounds.width + 10;
-    chatY = Math.max(10, Math.round(barBounds.y + barBounds.height / 2 - chatHeight / 2));
-  } else if (orientation === 'vertical-right') {
-    chatX = barBounds.x - chatWidth - 10;
-    chatY = Math.max(10, Math.round(barBounds.y + barBounds.height / 2 - chatHeight / 2));
-  } else {
-    chatX = Math.round(barBounds.x + barBounds.width / 2 - chatWidth / 2);
-    chatY = Math.max(10, barBounds.y - chatHeight - 10);
-  }
-  chatX = Math.max(0, Math.min(screenWidth - chatWidth, chatX));
-  chatY = Math.max(10, Math.min(screenHeight - chatHeight, chatY));
+  const chatX = Math.max(0, Math.min(screenWidth - chatWidth, Math.round(barBounds.x + barBounds.width / 2 - chatWidth / 2)));
+  const chatY = Math.max(10, barBounds.y - chatHeight - 10);
 
   chatWindow = new BrowserWindow({
     width: chatWidth,
@@ -482,51 +455,17 @@ ipcMain.handle('move-bar-by', (_, dx, dy) => {
   }
 });
 
-// 드래그 끝났을 때만 방향 판단 + 위치 저장
+// 드래그 끝 → 위치 저장
 ipcMain.handle('drag-end', () => {
   if (!floatBar || floatBar.isDestroyed()) return;
-
-  const { width: sw } = screen.getPrimaryDisplay().workAreaSize;
-  const bounds = floatBar.getBounds();
-  const EDGE = 10;
-
-  let orientation = 'horizontal';
-  if (bounds.x <= EDGE) orientation = 'vertical-left';
-  else if (bounds.x + bounds.width >= sw - EDGE) orientation = 'vertical-right';
-
-  const prev = store.get('floatbar-orientation', 'horizontal');
-  if (orientation !== prev) {
-    const { height: sh } = screen.getPrimaryDisplay().workAreaSize;
-    if (orientation === 'horizontal') {
-      floatBar.setMinimumSize(200, 80);
-      floatBar.setMaximumSize(9999, 120);
-      floatBar.setBounds({ x: bounds.x, y: sh - 100, width: 420, height: 100 });
-    } else if (orientation === 'vertical-left') {
-      floatBar.setMinimumSize(80, 200);
-      floatBar.setMaximumSize(120, 9999);
-      floatBar.setBounds({ x: 0, y: Math.round(sh / 2 - 210), width: 100, height: 420 });
-    } else {
-      floatBar.setMinimumSize(80, 200);
-      floatBar.setMaximumSize(120, 9999);
-      floatBar.setBounds({ x: sw - 100, y: Math.round(sh / 2 - 210), width: 100, height: 420 });
-    }
-    store.set('floatbar-orientation', orientation);
-    floatBar.webContents.send('orientation-change', orientation);
-  }
-
   store.set('floatbar-bounds', floatBar.getBounds());
 });
 
 ipcMain.handle('reset-bar-position', () => {
-  const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize;
-  const bounds = { width: 420, height: 100, x: Math.round(screenWidth / 2 - 210), y: screenHeight - 100 };
+  const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
   store.delete('floatbar-bounds');
-  store.delete('floatbar-orientation');
   if (floatBar && !floatBar.isDestroyed()) {
-    floatBar.setMinimumSize(200, 80);
-    floatBar.setMaximumSize(9999, 120);
-    floatBar.setBounds(bounds);
-    floatBar.webContents.send('orientation-change', 'horizontal');
+    floatBar.setBounds({ width: 420, height: 100, x: Math.round(sw / 2 - 210), y: sh - 100 });
   }
   return true;
 });

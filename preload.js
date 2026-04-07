@@ -23,8 +23,6 @@ contextBridge.exposeInMainWorld('api', {
   resetAgentCustom: (agentId) => ipcRenderer.invoke('reset-agent-custom', agentId),
   pickAgentImage: (agentId) => ipcRenderer.invoke('pick-agent-image', agentId),
   getDefaultRole: (agentId) => ipcRenderer.invoke('get-default-role', agentId),
-  // 플로팅 바 방향
-  onOrientationChange: (callback) => ipcRenderer.on('orientation-change', (_, o) => callback(o)),
   // Ollama 상태
   getLlmStatus: () => ipcRenderer.invoke('get-llm-status'),
   getPendingChat: (agentId) => ipcRenderer.invoke('get-pending-chat', agentId),
