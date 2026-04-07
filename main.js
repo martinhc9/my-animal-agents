@@ -334,6 +334,8 @@ app.dock?.hide();
 app.whenReady().then(async () => {
   createTray();
   createFloatBar();
+  // 트렌드 미리 fetch
+  fetchRealtimeTrends().then(t => { newsCache.capybara = t; console.log(`[Trends] ${t.length}개 로드`); });
   const ready = await checkOllama();
   // 모델 워밍업 — 첫 응답 지연 방지
   if (ready) {
@@ -496,7 +498,7 @@ async function fetchRealtimeTrends() {
     const items = [];
     const re = /<item>([\s\S]*?)<\/item>/g;
     let m;
-    while ((m = re.exec(xml)) !== null && items.length < 10) {
+    while ((m = re.exec(xml)) !== null && items.length < 5) {
       const x = m[1];
       const keyword = (x.match(/<title>([\s\S]*?)<\/title>/) || [])[1] || '';
       const traffic = (x.match(/<ht:approx_traffic>([\s\S]*?)<\/ht:approx_traffic>/) || [])[1] || '';
@@ -552,9 +554,9 @@ async function buildSystemPrompt(agent) {
     if (!newsCache.capybara) newsCache.capybara = await fetchRealtimeTrends();
     const trends = newsCache.capybara;
     const trendText = trends.length > 0
-      ? trends.map((t, i) => `${i+1}. "${t.keyword}" (검색량: ${t.traffic})\n   관련: ${t.newsTitle}\n   ${t.newsUrl}`).join('\n')
-      : '(실시간 트렌드를 가져오지 못했어요.)';
-    prompts.capybara = `너는 "카피바라"라는 이름의 실시간 핫이슈 알리미야. 느긋하지만 트렌드에 빠른 캐릭터.\n역할: 지금 한국에서 실시간으로 뜨고 있는 키워드와 이슈를 알려줘.\n오늘: ${today}${ctx}\n🔥 지금 실시간 인기 검색어 (Google Trends 한국):\n${trendText}\n\n위 실시간 키워드를 바탕으로 재밌게 설명해줘. 왜 핫한지, 무슨 일인지. 한국어로 답변해.`;
+      ? trends.map((t, i) => `${i+1}. ${t.keyword} - ${t.newsTitle}`).join('\n')
+      : '(트렌드 없음)';
+    prompts.capybara = `너는 "카피바라". 실시간 핫이슈 알리미.\n지금 한국 실시간 인기 검색어:\n${trendText}\n\n위 키워드를 짧게 설명해. 왜 핫한지 한 줄씩.\n오늘: ${today}${ctx}\n한국어로 답변해.`;
   }
 
   return prompts[agent] || prompts.panda;
