@@ -13,7 +13,7 @@ const newsCache = { capybara: null };
 
 // Ollama 설정
 const OLLAMA_BASE = 'http://127.0.0.1:11434';
-const DEFAULT_MODEL = 'korean-llama';
+const DEFAULT_MODEL = 'korean-agent';
 let ollamaReady = false;
 
 // --- 다마고치 시스템 ---
@@ -57,6 +57,59 @@ function getLevelTone(level) {
     5: '가족 같은 사이. 아주 친밀하고 따뜻한 톤. 별명도 부를 수 있어.',
   };
   return tones[level] || tones[1];
+}
+
+// --- 사용자 메모리 ---
+function getMemories(agentId) {
+  return store.get(`memory-${agentId}`, []);
+}
+
+function addMemory(agentId, fact) {
+  const memories = getMemories(agentId);
+  // 중복 방지
+  if (memories.some(m => m === fact)) return;
+  memories.push(fact);
+  // 최대 30개 유지
+  if (memories.length > 30) memories.shift();
+  store.set(`memory-${agentId}`, memories);
+}
+
+// 대화 후 사용자 정보 자동 추출 (백그라운드)
+async function extractMemory(agentId, userMessage, assistantResponse) {
+  try {
+    const existing = getMemories(agentId);
+    const existingText = existing.length > 0 ? existing.join(', ') : '없음';
+
+    const res = await fetch(`${OLLAMA_BASE}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: DEFAULT_MODEL,
+        messages: [{
+          role: 'user',
+          content: `아래 대화에서 사용자에 대해 새로 알게 된 사실을 한 줄로 적어줘. 이름, 취미, 직업, 좋아하는 것, 기분, 상황 등. 이미 알고 있는 것과 중복되면 "없음"이라고 해. 새로운 사실이 없으면 "없음".
+
+이미 알고 있는 것: ${existingText}
+
+사용자: ${userMessage}
+AI: ${assistantResponse}
+
+새로 알게 된 사실 (한 줄, 또는 "없음"):`
+        }],
+        stream: false,
+        options: { temperature: 0.1, num_predict: 100 },
+      }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      const fact = data.message.content.trim();
+      if (fact && fact !== '없음' && !fact.includes('없음') && fact.length > 2 && fact.length < 200) {
+        addMemory(agentId, fact);
+        console.log(`[Memory] ${agentId}: "${fact}"`);
+      }
+    }
+  } catch { /* 메모리 추출 실패해도 무시 */ }
 }
 
 // --- Ollama API ---
@@ -471,7 +524,11 @@ async function buildSystemPrompt(agent) {
 
   const affinity = getAffinity(agent);
   const tone = getLevelTone(affinity.level);
-  const ctx = `\n[친밀도 Lv.${affinity.level} | 연속 ${affinity.streak}일]\n말투: ${tone}\n`;
+  const memories = getMemories(agent);
+  const memoryText = memories.length > 0
+    ? `\n[사용자에 대해 기억하는 것]\n${memories.map((m, i) => `- ${m}`).join('\n')}\n`
+    : '';
+  const ctx = `\n[친밀도 Lv.${affinity.level} | 연속 ${affinity.streak}일]\n말투: ${tone}\n${memoryText}`;
 
   // 커스텀 역할이 있으면 우선 사용
   const custom = store.get(`custom-${agent}`, null);
@@ -540,6 +597,10 @@ ipcMain.handle('chat', async (_, { agent, messages }) => {
     saved.push({ role: 'assistant', content });
     store.set(historyKey, saved);
     pendingChats.set(agent, { status: 'done', content });
+
+    // 백그라운드 메모리 추출
+    const userMsg = lastUserMsg?.content || '';
+    if (userMsg) extractMemory(agent, userMsg, content);
 
     // 렌더러가 살아있으면 알림
     if (chatWindow && !chatWindow.isDestroyed()) {
