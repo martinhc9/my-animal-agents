@@ -439,7 +439,10 @@
       window.api.closeChat();
     });
 
-    $('#settings-close').addEventListener('click', () => window.api.closeChat());
+    $('#settings-close').addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      window.api.closeChat();
+    });
 
     // 캐릭터 설정 패널
     $('#agent-settings-btn').addEventListener('mousedown', async (e) => {

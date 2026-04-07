@@ -340,13 +340,11 @@ function createChatWindow(agentId) {
     query: { agent: agentId },
   });
 
-  if (agentId !== 'settings') {
-    chatWindow.on('blur', () => {
-      if (chatWindow && !chatWindow.isDestroyed()) {
-        chatWindow.close();
-      }
-    });
-  }
+  chatWindow.on('blur', () => {
+    if (chatWindow && !chatWindow.isDestroyed()) {
+      chatWindow.close();
+    }
+  });
 
   chatWindow.on('closed', () => {
     chatWindow = null;
