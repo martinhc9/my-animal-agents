@@ -280,7 +280,19 @@ app.dock?.hide();
 app.whenReady().then(async () => {
   createTray();
   createFloatBar();
-  await checkOllama();
+  const ready = await checkOllama();
+  // 모델 워밍업 — 첫 응답 지연 방지
+  if (ready) {
+    console.log('[Ollama] 모델 워밍업 시작...');
+    try {
+      await fetch(`${OLLAMA_BASE}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: DEFAULT_MODEL, messages: [{ role: 'user', content: 'hi' }], stream: false }),
+      });
+      console.log('[Ollama] 워밍업 완료');
+    } catch { console.log('[Ollama] 워밍업 실패'); }
+  }
 });
 
 // --- IPC handlers ---
