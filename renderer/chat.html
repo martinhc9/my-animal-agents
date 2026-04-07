@@ -398,6 +398,8 @@
         history = saved;
       } else {
         history = [{ role: 'assistant', content: greetings[agentId] }];
+        // greeting을 store에 저장하여 창 닫아도 유지
+        window.api.saveHistory(agentId, history);
       }
       renderMessages();
 
@@ -437,6 +439,7 @@
 
     // 캐릭터 설정 패널
     $('#agent-settings-btn').addEventListener('click', async () => {
+      if (!currentAgent) return;
       const panel = $('#agent-config');
       if (!panel.classList.contains('hidden')) {
         panel.classList.add('hidden');

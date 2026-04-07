@@ -8,8 +8,8 @@ let tray = null;
 let floatBar = null;
 let chatWindow = null;
 
-// RSS 뉴스 캐시
-const newsCache = { panda: null, capybara: null };
+// RSS 뉴스 캐시 (카피바라용)
+const newsCache = { capybara: null };
 
 // Ollama 설정
 const OLLAMA_BASE = 'http://127.0.0.1:11434';
@@ -126,6 +126,9 @@ function createFloatBar() {
     store.delete('floatbar-bounds');
   }
 
+  const savedOrientation = store.get('floatbar-orientation', 'horizontal');
+  const isVertical = savedOrientation !== 'horizontal';
+
   floatBar = new BrowserWindow({
     ...bounds,
     frame: false,
@@ -134,9 +137,8 @@ function createFloatBar() {
     skipTaskbar: true,
     transparent: true,
     hasShadow: false,
-    minWidth: 200,
-    minHeight: 80,
-    maxHeight: 120,
+    minWidth: isVertical ? 80 : 200,
+    minHeight: isVertical ? 200 : 80,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -165,6 +167,10 @@ function createFloatBar() {
         window.api.setMouseThrough(true);
       });
     `);
+    // 저장된 수직/수평 모드 복원
+    if (savedOrientation !== 'horizontal') {
+      floatBar.webContents.send('orientation-change', savedOrientation);
+    }
   });
 }
 
@@ -251,7 +257,6 @@ function createChatWindow(agentId) {
 
   chatWindow.on('closed', () => {
     chatWindow = null;
-    newsCache.panda = null;
     newsCache.capybara = null;
   });
 }
@@ -464,14 +469,7 @@ async function buildSystemPrompt(agent) {
     nureong: `너는 "누렁이"라는 이름의 강아지 아재개그 장인이야. "...멍." 을 가끔 넣어.\n역할: 아재개그 전문! 말장난, 동음이의어 유머. 한 번에 1~2개씩.\n오늘: ${today}${ctx}\n19금 금지. 한국어로 답변해.`,
   };
 
-  if (agent === 'panda') {
-    if (!newsCache.panda) newsCache.panda = await fetchHRNews();
-    const news = newsCache.panda;
-    const newsText = news.length > 0
-      ? news.map((n, i) => `${i+1}. [${n.source}] ${n.title}\n   ${n.link}`).join('\n')
-      : '(뉴스를 가져오지 못했어요.)';
-    prompts.panda = `너는 "팬더"라는 이름의 판다 HR 뉴스 전문가야.\n역할: 오늘의 HR 뉴스를 요약/정리.\n오늘: ${today}${ctx}\n📰 오늘의 HR 뉴스:\n${newsText}\n한국어로 답변해.`;
-  }
+  // 판다는 게임 대결로 변경됨 — HR 뉴스 fetch 불필요
 
   if (agent === 'capybara') {
     if (!newsCache.capybara) newsCache.capybara = await fetchTrendNews();
@@ -489,9 +487,9 @@ async function buildSystemPrompt(agent) {
 // 진행 중인 채팅 추적
 const pendingChats = new Map(); // agentId → { status, content, error }
 
-ipcMain.handle('chat', (_, { agent, messages }) => {
+ipcMain.handle('chat', async (_, { agent, messages }) => {
   if (!ollamaReady) {
-    checkOllama();
+    await checkOllama();
     if (!ollamaReady) {
       return { status: 'error', error: 'Ollama가 실행 중이 아니에요. 터미널에서 "ollama serve"를 실행해주세요.' };
     }
