@@ -295,7 +295,7 @@
       monkey:   { name: '펀치', role: '용기충전' },
       cat:      { name: '야옹이', role: '플레이리스트' },
       capybara: { name: '카피바라', role: '실시간핫이슈' },
-      nureong:  { name: '벨루가', role: '아재개그' },
+      nureong:  { name: '벨루가', role: '웃긴이야기' },
     };
 
     function getAgentImg(agentId, level) {
@@ -315,7 +315,7 @@
       monkey: '안녕~ 나는 펀치야 🐵 오늘 하루는 어땠어? 기분이 어떤지 편하게 얘기해줘.',
       cat: '안녕! 나는 야옹이야 🎵 오늘은 어떤 하루야? 분위기를 알려주면 딱 맞는 플레이리스트를 만들어줄게!',
       capybara: '안녕~ 나는 카피바라야 🔥 지금 인스타랑 X에서 뭐가 핫한지 알려줄까?',
-      nureong: '안녕~ 나는 벨루가야 🐋 아재개그 해줄까? 근데 내가 웃기면 내가 제일 먼저 웃어버려서 문제야.',
+      nureong: '안녕~ 나는 벨루가야 🐋 진짜 웃긴 이야기 들려줄까? 컬투쇼 사연급으로!',
     };
 
     let currentAgent = null;
@@ -580,7 +580,17 @@
       startPolling();
     }
 
-    // main에서 직접 알림이 오는 경우 (창이 안 닫혔을 때)
+    // 스트리밍: 토큰이 올 때마다 로딩 메시지를 실시간 업데이트
+    window.api.onChatStream((data) => {
+      if (data.agent !== currentAgent) return;
+      const loadingIdx = history.findIndex(m => m.loading);
+      if (loadingIdx !== -1) {
+        history[loadingIdx] = { role: 'assistant', content: data.partial, loading: true };
+        renderMessages();
+      }
+    });
+
+    // 완료 시 히스토리 리로드
     window.api.onChatResponse(() => refreshFromStore());
 
     $('#send-btn').addEventListener('click', sendMessage);

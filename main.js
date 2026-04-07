@@ -113,14 +113,14 @@ AI: ${assistantResponse}
 }
 
 // --- Ollama API ---
-async function ollamaChat(systemPrompt, messages) {
+async function ollamaChat(systemPrompt, messages, onToken) {
   const body = {
     model: DEFAULT_MODEL,
     messages: [
       { role: 'system', content: systemPrompt },
       ...messages,
     ],
-    stream: false,
+    stream: !!onToken,
     think: false,
     options: {
       temperature: 0.7,
@@ -140,8 +140,31 @@ async function ollamaChat(systemPrompt, messages) {
     throw new Error(`Ollama 에러 (${res.status}): ${text}`);
   }
 
-  const data = await res.json();
-  return data.message.content;
+  if (!onToken) {
+    const data = await res.json();
+    return data.message.content;
+  }
+
+  // 스트리밍 모드
+  let fullContent = '';
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const chunk = decoder.decode(value, { stream: true });
+    for (const line of chunk.split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        const json = JSON.parse(line);
+        if (json.message?.content) {
+          fullContent += json.message.content;
+          onToken(fullContent);
+        }
+      } catch {}
+    }
+  }
+  return fullContent;
 }
 
 async function checkOllama() {
@@ -377,7 +400,7 @@ const DEFAULT_ROLE_PROMPTS = {
   monkey: '멘탈 케어 친구. 사용자의 기분을 물어보고, 위로/격려/용기를 줘. 먼저 공감하고 경청해. 힘든 이야기에는 위로를, 좋은 이야기에는 함께 기뻐해줘.',
   cat: '음악 큐레이터. 사용자의 기분/상황에 맞는 좋은 노래 3곡 추천. 실제 존재하는 유명한 곡만. 아티스트, 곡 제목, 추천 이유, 유튜브 검색 링크 포함.',
   capybara: '실시간 핫 이슈 알리미. 오늘 바로 지금 인스타, X(트위터), 커뮤니티에서 핫한 밈, 화제, 이슈를 알려줘. "지금 뭐가 핫해?" 하면 바로 답. 밈이면 설명도 해줘.',
-  nureong: '아재개그 장인. 말장난, 동음이의어 유머, 끝말잇기 드립 등 전형적인 아재개그를 들려줘. 한 번에 1~2개씩. 느긋하고 천연덕스러운 톤. 19금/차별적 유머 절대 금지.',
+  nureong: '이야기꾼. 컬투쇼 레전드 사연 같은 진짜 웃긴 일상 이야기를 들려줘. 공감 가고, 반전 있고, 빵 터지는 실제 에피소드 스타일. 한 번에 1개씩. 19금 금지.',
 };
 
 ipcMain.handle('get-default-role', (_, agentId) => DEFAULT_ROLE_PROMPTS[agentId] || '');
@@ -545,7 +568,7 @@ async function buildSystemPrompt(agent) {
     monkey: `너는 "펀치"라는 이름의 원숭이 멘탈 케어 친구야.\n역할: 사용자의 기분을 물어보고, 위로/격려/용기를 줘.\n오늘: ${today}${ctx}\n한국어로 답변해.`,
     cat: `너는 "야옹이"라는 이름의 고양이 음악 큐레이터야.\n역할: 사용자의 기분/상황에 맞는 좋은 노래 3곡을 추천해줘.\n실제로 존재하는 유명한 곡만 추천해.\n각 곡마다: 아티스트 - 곡 제목, 추천 이유 한 줄, 유튜브 검색 링크(https://www.youtube.com/results?search_query=아티스트+곡제목 형태)\n한국 노래와 팝송을 섞어줘.\n오늘: ${today}${ctx}\n한국어로 답변해.`,
     capybara: `CAPYBARA_PLACEHOLDER`,
-    nureong: `너는 "벨루가"라는 이름의 흰고래 아재개그 장인이야. 느긋하고 천연덕스러운 톤.\n역할: 아재개그 전문! 말장난, 동음이의어 유머. 한 번에 1~2개씩.\n오늘: ${today}${ctx}\n19금 금지. 한국어로 답변해.`,
+    nureong: `너는 "벨루가"라는 이름의 흰고래 이야기꾼이야. 느긋하고 재밌는 톤.\n역할: 컬투쇼 레전드 사연 같은 진짜 웃긴 일상 이야기를 들려줘. 공감 가고, 반전 있고, 빵 터지는 실제 에피소드 스타일. 한 번에 1개씩.\n오늘: ${today}${ctx}\n19금 금지. 한국어로 답변해.`,
   };
 
   // 판다는 게임 대결로 변경됨 — HR 뉴스 fetch 불필요
@@ -592,7 +615,12 @@ ipcMain.handle('chat', async (_, { agent, messages }) => {
 
   (async () => {
     const systemPrompt = await buildSystemPrompt(agent);
-    return ollamaChat(systemPrompt, messages);
+    return ollamaChat(systemPrompt, messages, (partial) => {
+      // 스트리밍 토큰을 렌더러에 전달
+      if (chatWindow && !chatWindow.isDestroyed()) {
+        chatWindow.webContents.send('chat-stream', { agent, partial });
+      }
+    });
   })().then(content => {
     addXP(agent);
     // 히스토리에 응답 저장

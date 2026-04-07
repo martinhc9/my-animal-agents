@@ -29,4 +29,5 @@ contextBridge.exposeInMainWorld('api', {
   getLlmStatus: () => ipcRenderer.invoke('get-llm-status'),
   getPendingChat: (agentId) => ipcRenderer.invoke('get-pending-chat', agentId),
   onChatResponse: (callback) => ipcRenderer.on('chat-response', (_, data) => callback(data)),
+  onChatStream: (callback) => ipcRenderer.on('chat-stream', (_, data) => callback(data)),
 });
