@@ -11,14 +11,8 @@
       overflow: hidden;
       height: 100vh;
       display: flex;
-      flex-direction: column;
-      justify-content: flex-end;
-    }
-
-    .trigger-zone {
-      flex: 1;
-      -webkit-app-region: no-drag;
-      pointer-events: auto;
+      align-items: center;
+      justify-content: center;
     }
 
     .bar {
@@ -27,7 +21,7 @@
       justify-content: center;
       gap: 8px;
       padding: 10px 18px;
-      margin: 0 auto 6px;
+      margin: 0;
       border-radius: 24px;
       background: rgba(20, 20, 40, 0.92);
       backdrop-filter: blur(20px);
@@ -168,7 +162,6 @@
   </style>
 </head>
 <body>
-  <div class="trigger-zone"></div>
   <div class="bar" id="bar">
     <!-- 동적 생성 -->
     <button class="settings-btn" title="설정">⚙️</button>

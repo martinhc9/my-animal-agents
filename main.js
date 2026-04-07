@@ -219,9 +219,9 @@ function createFloatBar() {
   const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize;
 
   const defaultBounds = {
-    width: 420, height: 100,
+    width: 420, height: 76,
     x: Math.round(screenWidth / 2 - 210),
-    y: screenHeight - 100,
+    y: screenHeight - 76,
   };
 
   let bounds = defaultBounds;
@@ -265,14 +265,17 @@ function createFloatBar() {
   floatBar.on('resized', saveBounds);
 
   floatBar.webContents.on('did-finish-load', () => {
-    floatBar.webContents.executeJavaScript(`
-      document.querySelector('.bar').addEventListener('mouseenter', () => {
-        window.api.setMouseThrough(false);
-      });
-      document.querySelector('.trigger-zone').addEventListener('mouseenter', () => {
-        window.api.setMouseThrough(true);
-      });
-    `);
+    // 고정 모드면 항상 클릭 가능, 아니면 hover로 전환
+    if (!pinned) {
+      floatBar.webContents.executeJavaScript(`
+        document.querySelector('.bar').addEventListener('mouseenter', () => {
+          window.api.setMouseThrough(false);
+        });
+        document.addEventListener('mouseleave', () => {
+          window.api.setMouseThrough(true);
+        });
+      `);
+    }
   });
 }
 
@@ -484,12 +487,12 @@ function applyBarPosition(pos) {
   const isVertical = pos === 'left' || pos === 'right';
 
   if (isVertical) {
-    const w = 100, h = 420;
+    const w = 80, h = 400;
     const x = pos === 'left' ? 0 : sw - w;
     const y = Math.round(sh / 2 - h / 2);
     floatBar.setBounds({ x, y, width: w, height: h });
   } else {
-    const w = 420, h = 100;
+    const w = 420, h = 76;
     const x = Math.round(sw / 2 - w / 2);
     const y = pos === 'top' ? 0 : sh - h;
     floatBar.setBounds({ x, y, width: w, height: h });
