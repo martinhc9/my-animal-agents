@@ -404,7 +404,23 @@
       $('#chat-view').classList.remove('hidden');
       $('#settings-view').classList.add('hidden');
 
-      setTimeout(() => { $('#input').focus(); checkPending(); }, 150);
+      setTimeout(async () => {
+        $('#input').focus();
+        // 이전에 닫혀서 못 받은 응답이 있으면 폴링
+        const pending = await window.api.getPendingChat(currentAgent);
+        if (pending && pending.status === 'loading') {
+          // 아직 응답 대기 중 — 로딩 표시 + 폴링
+          const agentName = $('#name').textContent;
+          history.push({ role: 'assistant', content: `${agentName} 생각 중`, loading: true });
+          renderMessages();
+          isSending = true;
+          $('#send-btn').disabled = true;
+          startPolling();
+        } else if (pending && pending.status === 'done') {
+          // 응답 완료 — 히스토리 리로드
+          await refreshFromStore();
+        }
+      }, 150);
     }
 
     // Read agent from URL query parameter
@@ -478,7 +494,47 @@
       $('#agent-config').classList.add('hidden');
     });
 
-    // Send message — main에서 비동기 처리, 창 닫혀도 응답 보장
+    // 응답 폴링 타이머
+    let pollTimer = null;
+
+    function stopPolling() {
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    }
+
+    async function refreshFromStore() {
+      if (!currentAgent) return false;
+      const latest = await window.api.loadHistory(currentAgent);
+      if (!latest) return false;
+
+      // 새 assistant 응답이 있는지 확인
+      const lastMsg = latest[latest.length - 1];
+      const hadLoading = history.some(m => m.loading);
+      if (hadLoading && lastMsg && lastMsg.role === 'assistant') {
+        history = latest;
+        renderMessages();
+
+        const [aff, cust] = await Promise.all([
+          window.api.getAffinity(currentAgent),
+          window.api.getAgentCustom(currentAgent),
+        ]);
+        $('#avatar').src = getAgentImg(currentAgent, aff.level);
+        $('#role').textContent = `${cust?.role || agentsInfo[currentAgent].role} | Lv.${aff.level}`;
+
+        isSending = false;
+        $('#send-btn').disabled = false;
+        $('#input').focus();
+        stopPolling();
+        return true;
+      }
+      return false;
+    }
+
+    function startPolling() {
+      stopPolling();
+      pollTimer = setInterval(() => refreshFromStore(), 1500);
+    }
+
+    // Send message
     async function sendMessage() {
       const text = $('#input').value.trim();
       if (!text || !currentAgent || isSending) return;
@@ -492,8 +548,7 @@
       renderMessages();
 
       const agentName = $('#name').textContent;
-      const loadingMsg = { role: 'assistant', content: `${agentName} 생각 중`, loading: true };
-      history.push(loadingMsg);
+      history.push({ role: 'assistant', content: `${agentName} 생각 중`, loading: true });
       renderMessages();
 
       const apiMessages = history
@@ -504,8 +559,7 @@
       const result = await window.api.chat(currentAgent, apiMessages);
 
       if (result.status === 'error') {
-        const idx = history.indexOf(loadingMsg);
-        if (idx !== -1) history.splice(idx, 1);
+        history = history.filter(m => !m.loading);
         history.push({ role: 'assistant', content: result.error, error: true });
         renderMessages();
         isSending = false;
@@ -513,41 +567,12 @@
         return;
       }
 
-      // status === 'processing' — main에서 백그라운드 처리 중
-      // 응답은 onChatResponse로 받음
+      // 백그라운드 처리 중 — 폴링 시작
+      startPolling();
     }
 
-    // main에서 응답이 오면 처리
-    window.api.onChatResponse(async (data) => {
-      if (data.agent !== currentAgent) return;
-
-      // 로딩 메시지 제거 후 히스토리를 main에서 리로드
-      const latest = await window.api.loadHistory(currentAgent);
-      if (latest) history = latest;
-      renderMessages();
-
-      const [newAffinity, newCustom] = await Promise.all([
-        window.api.getAffinity(currentAgent),
-        window.api.getAgentCustom(currentAgent),
-      ]);
-      $('#avatar').src = getAgentImg(currentAgent, newAffinity.level);
-      const displayRole = newCustom?.role || agentsInfo[currentAgent].role;
-      $('#role').textContent = `${displayRole} | Lv.${newAffinity.level}`;
-
-      isSending = false;
-      $('#send-btn').disabled = false;
-      $('#input').focus();
-    });
-
-    // 창 열었을 때 pending 응답 확인 (이전에 닫혀서 못 받은 경우)
-    async function checkPending() {
-      if (!currentAgent) return;
-      const pending = await window.api.getPendingChat(currentAgent);
-      if (pending && pending.status === 'done') {
-        const latest = await window.api.loadHistory(currentAgent);
-        if (latest) { history = latest; renderMessages(); }
-      }
-    }
+    // main에서 직접 알림이 오는 경우 (창이 안 닫혔을 때)
+    window.api.onChatResponse(() => refreshFromStore());
 
     $('#send-btn').addEventListener('click', sendMessage);
 
