@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>Agents</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: transparent;
+      overflow: hidden;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+    }
+
+    .trigger-zone {
+      flex: 1;
+      -webkit-app-region: no-drag;
+      pointer-events: auto;
+    }
+
+    .bar {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 10px 18px;
+      margin: 0 auto 6px;
+      border-radius: 24px;
+      background: rgba(20, 20, 40, 0.92);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+      transform: translateY(80px);
+      transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease;
+      opacity: 0;
+      cursor: grab;
+    }
+
+    body:hover .bar {
+      transform: translateY(0);
+      opacity: 1;
+    }
+
+    .agent-btn {
+      width: 56px;
+      height: 56px;
+      border-radius: 16px;
+      border: none;
+      background: rgba(255, 255, 255, 0.06);
+      cursor: grab;
+      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      -webkit-app-region: no-drag;
+      position: relative;
+      padding: 4px;
+      overflow: visible;
+    }
+
+    .agent-btn img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      border-radius: 12px;
+    }
+
+    .agent-btn:hover {
+      background: rgba(255, 255, 255, 0.18);
+      transform: translateY(-4px) scale(1.15);
+    }
+
+    .agent-btn:active {
+      transform: translateY(-2px) scale(1.06);
+    }
+
+    .agent-btn::after {
+      content: attr(data-name);
+      position: absolute;
+      top: -32px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.88);
+      color: white;
+      font-size: 11px;
+      padding: 4px 10px;
+      border-radius: 8px;
+      white-space: nowrap;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.15s;
+      font-family: -apple-system, sans-serif;
+    }
+
+    .agent-btn:hover::after {
+      opacity: 1;
+    }
+
+    /* 레벨 뱃지 */
+    .level-badge {
+      position: absolute;
+      bottom: 2px;
+      right: 2px;
+      background: rgba(99, 102, 241, 0.9);
+      color: white;
+      font-size: 9px;
+      font-weight: 700;
+      padding: 1px 4px;
+      border-radius: 6px;
+      font-family: -apple-system, sans-serif;
+      pointer-events: none;
+    }
+
+    /* 드래그 중 스타일 */
+    .agent-btn.dragging {
+      opacity: 0.4;
+      transform: scale(0.9);
+    }
+
+    .settings-btn {
+      width: 32px;
+      height: 32px;
+      border-radius: 10px;
+      border: none;
+      background: rgba(255, 255, 255, 0.04);
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      -webkit-app-region: no-drag;
+      margin-left: 4px;
+    }
+
+    .settings-btn:hover {
+      background: rgba(255, 255, 255, 0.12);
+      transform: rotate(45deg);
+    }
+  </style>
+</head>
+<body>
+  <div class="trigger-zone"></div>
+  <div class="bar" id="bar">
+    <!-- 동적 생성 -->
+    <button class="settings-btn" title="설정">⚙️</button>
+  </div>
+
+  <script>
+    const agentColors = {
+      panda:    'rgba(74, 108, 247, 0.15)',
+      monkey:   'rgba(245, 158, 11, 0.15)',
+      cat:      'rgba(168, 85, 247, 0.15)',
+      capybara: 'rgba(16, 185, 129, 0.15)',
+      nureong:  'rgba(234, 179, 8, 0.15)',
+    };
+
+    const defaultAgentNames = {
+      panda: '팬더 - HR뉴스',
+      monkey: '펀치 - 용기충전',
+      cat: '야옹이 - 플레이리스트',
+      capybara: '카피바라 - 오늘의트렌드',
+      nureong: '누렁이 - 아재개그',
+    };
+
+    async function buildBar() {
+      const [order, affinities] = await Promise.all([
+        window.api.getAgentsOrder(),
+        window.api.getAllAffinities(),
+      ]);
+
+      const bar = document.getElementById('bar');
+      const settingsBtn = bar.querySelector('.settings-btn');
+
+      // 기존 agent 버튼 제거
+      bar.querySelectorAll('.agent-btn').forEach(b => b.remove());
+
+      // 커스텀 데이터 병렬 로드
+      const customs = await Promise.all(order.map(id => window.api.getAgentCustom(id)));
+      const customMap = {};
+      order.forEach((id, i) => { customMap[id] = customs[i]; });
+
+      // 순서대로 버튼 생성
+      for (const agentId of order) {
+        const level = affinities[agentId]?.level || 1;
+        const custom = customMap[agentId];
+        const displayName = custom?.name
+          ? `${custom.name} - ${custom.role || ''}`
+          : defaultAgentNames[agentId] || agentId;
+
+        const btn = document.createElement('button');
+        btn.className = 'agent-btn';
+        btn.dataset.agent = agentId;
+        btn.dataset.name = `${displayName} (Lv.${level})`;
+        btn.draggable = true;
+        btn.style.background = agentColors[agentId] || 'rgba(255, 255, 255, 0.06)';
+        btn.innerHTML = `
+          <img src="../assets/${agentId}-lv${level}.png" alt="${agentId}">
+          <span class="level-badge">Lv.${level}</span>
+        `;
+
+        btn.addEventListener('click', () => {
+          window.api.openAgent(agentId);
+        });
+
+        bar.insertBefore(btn, settingsBtn);
+      }
+
+      // 드래그 정렬
+      setupDragSort();
+    }
+
+    function setupDragSort() {
+      let draggedEl = null;
+
+      // FLIP 애니메이션으로 부드럽게 이동
+      function animateSwap(bar) {
+        const btns = [...bar.querySelectorAll('.agent-btn')];
+        // First: 현재 위치 기록
+        const firstRects = new Map();
+        btns.forEach(b => firstRects.set(b, b.getBoundingClientRect()));
+        return function play() {
+          btns.forEach(b => {
+            const first = firstRects.get(b);
+            const last = b.getBoundingClientRect();
+            const dx = first.left - last.left;
+            if (Math.abs(dx) > 1) {
+              b.style.transition = 'none';
+              b.style.transform = `translateX(${dx}px)`;
+              requestAnimationFrame(() => {
+                b.style.transition = 'transform 0.25s cubic-bezier(0.16, 1, 0.3, 1)';
+                b.style.transform = '';
+              });
+            }
+          });
+        };
+      }
+
+      document.querySelectorAll('.agent-btn').forEach(btn => {
+        btn.addEventListener('dragstart', (e) => {
+          draggedEl = btn;
+          btn.classList.add('dragging');
+          e.dataTransfer.effectAllowed = 'move';
+        });
+
+        btn.addEventListener('dragend', () => {
+          btn.classList.remove('dragging');
+          draggedEl = null;
+          saveOrder();
+        });
+
+        btn.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          if (draggedEl && draggedEl !== btn) {
+            const bar = document.getElementById('bar');
+            const allBtns = [...bar.querySelectorAll('.agent-btn')];
+            const dragIdx = allBtns.indexOf(draggedEl);
+            const overIdx = allBtns.indexOf(btn);
+
+            // FLIP: 기록 → 이동 → 애니메이션
+            const play = animateSwap(bar);
+            if (dragIdx < overIdx) {
+              bar.insertBefore(draggedEl, btn.nextSibling);
+            } else {
+              bar.insertBefore(draggedEl, btn);
+            }
+            play();
+          }
+        });
+      });
+    }
+
+    function saveOrder() {
+      const btns = document.querySelectorAll('.agent-btn');
+      const order = [...btns].map(b => b.dataset.agent);
+      window.api.setAgentsOrder(order);
+    }
+
+    document.querySelector('.settings-btn').addEventListener('click', () => {
+      window.api.openSettings();
+    });
+
+    // 바 전체 드래그 이동 — 떨림 방지: throttle + 최소 이동 거리
+    (function setupBarDrag() {
+      const bar = document.getElementById('bar');
+      let isDragging = false;
+      let startX = 0, startY = 0;
+      let pending = false;
+
+      bar.addEventListener('mousedown', (e) => {
+        if (e.target.closest('.agent-btn') || e.target.closest('.settings-btn')) return;
+        isDragging = true;
+        startX = e.screenX;
+        startY = e.screenY;
+        bar.style.cursor = 'grabbing';
+        e.preventDefault();
+      });
+
+      window.addEventListener('mousemove', (e) => {
+        if (!isDragging || pending) return;
+        const dx = e.screenX - startX;
+        const dy = e.screenY - startY;
+        if (Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
+
+        pending = true;
+        startX = e.screenX;
+        startY = e.screenY;
+        window.api.moveBarBy(dx, dy);
+        // 다음 프레임까지 대기하여 떨림 방지
+        requestAnimationFrame(() => { pending = false; });
+      });
+
+      window.addEventListener('mouseup', () => {
+        if (isDragging) {
+          isDragging = false;
+          bar.style.cursor = 'grab';
+        }
+      });
+    })();
+
+    buildBar();
+  </script>
+</body>
+</html>

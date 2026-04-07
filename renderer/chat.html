@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>Chat</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: rgba(18, 18, 35, 0.94);
+      --bg-card: rgba(255, 255, 255, 0.06);
+      --text: #e8e8e8;
+      --text-secondary: #a0a0b8;
+      --border: rgba(255, 255, 255, 0.08);
+      --radius: 16px;
+      --accent: #6366f1;
+    }
+
+    html, body {
+      height: 100%;
+      margin: 0;
+      background: transparent;
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
+      color: var(--text);
+    }
+
+    .container {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background: var(--bg);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+    }
+
+    /* Chat view - must fill container and flex properly */
+    #chat-view {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0; /* critical for nested flex scroll */
+    }
+
+    /* Header */
+    .chat-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      -webkit-app-region: drag;
+    }
+
+    .btn-close {
+      width: 32px; height: 32px;
+      border-radius: 8px; border: none;
+      background: rgba(255,255,255,0.08);
+      color: var(--text-secondary);
+      font-size: 16px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      -webkit-app-region: no-drag;
+      transition: all 0.2s;
+      position: relative;
+      z-index: 100;
+    }
+    .btn-close:hover { background: rgba(239,68,68,0.3); color: #ef4444; }
+
+    .header-info { display: flex; align-items: center; gap: 10px; flex: 1; }
+    .header-avatar { width: 34px; height: 34px; border-radius: 10px; object-fit: cover; background: rgba(255,255,255,0.06); }
+    .header-name { font-size: 15px; font-weight: 600; }
+    .header-role {
+      font-size: 11px; color: var(--text-secondary);
+      background: var(--bg-card); padding: 2px 8px; border-radius: 10px;
+    }
+
+    /* Messages - scrollable area */
+    .messages {
+      flex: 1;
+      min-height: 0; /* THIS is the key to making flex+overflow work */
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .message {
+      max-width: 85%;
+      padding: 10px 14px;
+      border-radius: 16px;
+      font-size: 13.5px;
+      line-height: 1.55;
+      word-wrap: break-word;
+      white-space: pre-wrap;
+      animation: fadeIn 0.2s ease-out;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .message.user {
+      align-self: flex-end;
+      background: linear-gradient(135deg, #4a6cf7, var(--accent));
+      color: white;
+      border-bottom-right-radius: 4px;
+    }
+
+    .message.assistant {
+      align-self: flex-start;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-bottom-left-radius: 4px;
+    }
+
+    .message.error {
+      color: #f87171;
+      background: rgba(239,68,68,0.1);
+      border-color: rgba(239,68,68,0.2);
+    }
+
+    .message.loading { color: var(--text-secondary); }
+
+    .typing-dots::after {
+      content: '';
+      animation: dots 1.5s steps(4, end) infinite;
+    }
+    @keyframes dots {
+      0% { content: ''; }
+      25% { content: '.'; }
+      50% { content: '..'; }
+      75% { content: '...'; }
+    }
+
+    .message a, .message .ext-link {
+      color: #93c5fd;
+      text-decoration: underline;
+      cursor: pointer;
+    }
+    .message .ext-link:hover { color: #bfdbfe; }
+
+    /* Input */
+    .input-area {
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+      padding: 12px 14px;
+      border-top: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    textarea {
+      flex: 1;
+      padding: 10px 14px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.04);
+      color: var(--text);
+      font-size: 13.5px;
+      font-family: inherit;
+      resize: none;
+      outline: none;
+      max-height: 100px;
+      line-height: 1.4;
+      transition: border-color 0.2s;
+    }
+    textarea:focus { border-color: rgba(99,102,241,0.4); }
+
+    .btn-send {
+      width: 36px; height: 36px;
+      border-radius: 50%; border: none;
+      background: linear-gradient(135deg, #4a6cf7, var(--accent));
+      color: white; font-size: 18px; font-weight: 700;
+      cursor: pointer; flex-shrink: 0;
+      transition: opacity 0.2s, transform 0.1s;
+    }
+    .btn-send:hover { opacity: 0.9; }
+    .btn-send:active { transform: scale(0.92); }
+    .btn-send:disabled { opacity: 0.3; cursor: not-allowed; }
+
+    /* Settings */
+    .settings-view {
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      flex: 1; padding: 40px; gap: 16px;
+    }
+    .settings-view h2 { font-size: 18px; font-weight: 600; }
+    .settings-view p { color: var(--text-secondary); font-size: 12px; text-align: center; }
+    .settings-view input {
+      width: 100%; padding: 12px 16px; border-radius: 12px;
+      border: 1px solid var(--border); background: rgba(255,255,255,0.04);
+      color: var(--text); font-size: 14px; outline: none;
+    }
+    .settings-view input:focus { border-color: rgba(99,102,241,0.4); }
+    .btn-save {
+      width: 100%; padding: 12px; border-radius: 12px; border: none;
+      background: linear-gradient(135deg, #4a6cf7, var(--accent));
+      color: white; font-size: 14px; font-weight: 600; cursor: pointer;
+    }
+    .btn-save:hover { opacity: 0.9; }
+    .btn-settings-close {
+      background: rgba(255,255,255,0.06); color: var(--text-secondary);
+      border: none; padding: 10px; border-radius: 10px; width: 100%;
+      cursor: pointer; font-size: 13px; margin-top: 4px;
+    }
+    .btn-settings-close:hover { background: rgba(255,255,255,0.1); }
+
+    .hidden { display: none !important; }
+
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.25); }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div id="chat-view">
+      <div class="chat-header">
+        <button class="btn-close" id="close-btn">✕</button>
+        <div class="header-info">
+          <img class="header-avatar" id="avatar" src="">
+          <span class="header-name" id="name"></span>
+          <span class="header-role" id="role"></span>
+        </div>
+        <button class="btn-agent-settings" id="agent-settings-btn" title="캐릭터 설정" style="
+          width:28px;height:28px;border-radius:8px;border:none;
+          background:rgba(255,255,255,0.06);color:var(--text-secondary);
+          font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;
+          -webkit-app-region:no-drag;transition:all 0.2s;flex-shrink:0;
+        ">⚙</button>
+      </div>
+
+      <!-- 캐릭터 설정 패널 -->
+      <div id="agent-config" class="hidden" style="
+        padding:14px 16px;border-bottom:1px solid var(--border);
+        background:rgba(255,255,255,0.03);flex-shrink:0;
+        display:flex;flex-direction:column;gap:8px;
+      ">
+        <div style="font-size:12px;font-weight:600;color:var(--text-secondary);">캐릭터 설정</div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <img id="config-avatar" style="width:44px;height:44px;border-radius:12px;object-fit:cover;background:rgba(255,255,255,0.06);cursor:pointer;" title="클릭하여 이미지 변경">
+          <button id="config-img-btn" style="
+            padding:6px 12px;border-radius:8px;border:1px solid var(--border);
+            background:transparent;color:var(--text-secondary);font-size:11px;cursor:pointer;
+          ">이미지 변경</button>
+        </div>
+        <input id="config-name" placeholder="이름 (예: 누렁이)" style="
+          padding:8px 12px;border-radius:8px;border:1px solid var(--border);
+          background:rgba(255,255,255,0.04);color:var(--text);font-size:13px;outline:none;
+        ">
+        <textarea id="config-role" placeholder="이 캐릭터가 할 일을 적어주세요.&#10;예: 아재개그 전문가. 말장난과 동음이의어 유머를 들려줘.&#10;예: 매일 운동 루틴을 짜줘. 근력 운동 위주로." rows="3" style="
+          padding:8px 12px;border-radius:8px;border:1px solid var(--border);
+          background:rgba(255,255,255,0.04);color:var(--text);font-size:13px;outline:none;
+          resize:none;font-family:inherit;line-height:1.4;
+        "></textarea>
+        <div style="display:flex;gap:6px;">
+          <button id="config-save" style="
+            flex:1;padding:8px;border-radius:8px;border:none;
+            background:linear-gradient(135deg,#4a6cf7,var(--accent));
+            color:white;font-size:12px;font-weight:600;cursor:pointer;
+          ">저장</button>
+          <button id="config-reset" style="
+            padding:8px 12px;border-radius:8px;border:1px solid var(--border);
+            background:transparent;color:var(--text-secondary);font-size:12px;cursor:pointer;
+          ">초기화</button>
+        </div>
+      </div>
+
+      <div class="messages" id="messages"></div>
+      <div class="input-area">
+        <textarea id="input" placeholder="메시지를 입력하세요..." rows="1"></textarea>
+        <button class="btn-send" id="send-btn">↑</button>
+      </div>
+    </div>
+
+    <div id="settings-view" class="settings-view hidden">
+      <div style="font-size:40px;margin-bottom:8px;">🧠</div>
+      <h2>AI 엔진</h2>
+      <p style="color:var(--text-secondary);font-size:11px;">Ollama (qwen2.5:7b)<br>로컬에서 실행됩니다.</p>
+      <div id="model-status" style="color:var(--text-secondary);font-size:12px;min-height:20px;text-align:center;"></div>
+      <button class="btn-settings-close" id="settings-close">닫기</button>
+    </div>
+  </div>
+
+  <script>
+    const agentsInfo = {
+      panda:    { name: '팬더', role: 'HR뉴스' },
+      monkey:   { name: '펀치', role: '용기충전' },
+      cat:      { name: '야옹이', role: '플레이리스트' },
+      capybara: { name: '카피바라', role: '오늘의트렌드' },
+      nureong:  { name: '누렁이', role: '아재개그' },
+    };
+
+    function getAgentImg(agentId, level) {
+      return `../assets/${agentId}-lv${level || 1}.png`;
+    }
+
+    const agentColors = {
+      panda:    'rgba(74, 108, 247, 0.15)',
+      monkey:   'rgba(245, 158, 11, 0.15)',
+      cat:      'rgba(168, 85, 247, 0.15)',
+      capybara: 'rgba(16, 185, 129, 0.15)',
+      nureong:  'rgba(234, 179, 8, 0.15)',
+    };
+
+    const greetings = {
+      panda: '안녕! 나는 팬더야 🐼 오늘의 HR 뉴스와 트렌드를 알려줄게! 궁금한 주제가 있으면 말해줘, 아니면 바로 오늘의 HR 핫토픽 3가지를 정리해줄게!',
+      monkey: '안녕~ 나는 펀치야 🐵 오늘 하루는 어땠어? 기분이 어떤지 편하게 얘기해줘.',
+      cat: '안녕! 나는 야옹이야 🎵 오늘은 어떤 하루야? 분위기를 알려주면 딱 맞는 플레이리스트를 만들어줄게!',
+      capybara: '안녕~ 나는 카피바라야 🔥 오늘 뭐가 핫한지 알려줄까? "오늘의 트렌드" 들어볼래?',
+      nureong: '...멍. 나 누렁이. 아재개그 해줄까? 근데 내가 웃기면 내가 제일 먼저 웃어버려서 문제야.',
+    };
+
+    let currentAgent = null;
+    let history = [];
+    let isSending = false;
+
+    const $ = (sel) => document.querySelector(sel);
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function linkify(text) {
+      const escaped = escapeHtml(text);
+      // Match URLs, then decode &amp; back to & for data-url
+      return escaped.replace(
+        /(https?:\/\/[^\s<]+)/g,
+        (match) => {
+          const decoded = match.replace(/&amp;/g, '&');
+          return `<a href="#" class="ext-link" data-url="${decoded}">${match}</a>`;
+        }
+      );
+    }
+
+    function renderMessages() {
+      const container = $('#messages');
+      container.innerHTML = history
+        .map(m => {
+          let cls = m.role;
+          if (m.error) cls += ' error';
+          if (m.loading) cls += ' loading';
+          const content = m.loading
+            ? `<span>${escapeHtml(m.content)}</span><span class="typing-dots"></span>`
+            : linkify(m.content);
+          return `<div class="message ${cls}">${content}</div>`;
+        })
+        .join('');
+
+      // Scroll to bottom smoothly
+      requestAnimationFrame(() => {
+        container.scrollTop = container.scrollHeight;
+      });
+    }
+
+    async function initChat(agentId) {
+      if (agentId === 'settings') {
+        $('#chat-view').classList.add('hidden');
+        $('#settings-view').classList.remove('hidden');
+
+        const status = await window.api.getLlmStatus();
+        if (status.ready) {
+          $('#model-status').textContent = '연결됨: ' + (status.model || '');
+          $('#model-status').style.color = '#10b981';
+        } else {
+          $('#model-status').textContent = 'Ollama 연결 안 됨. "ollama serve" 실행 필요';
+          $('#model-status').style.color = '#f87171';
+        }
+        return;
+      }
+
+      currentAgent = agentId;
+      const info = agentsInfo[agentId];
+      if (!info) return;
+
+      const [affinity, custom] = await Promise.all([
+        window.api.getAffinity(agentId),
+        window.api.getAgentCustom(agentId),
+      ]);
+      $('#avatar').src = getAgentImg(agentId, affinity.level);
+      $('#avatar').style.background = agentColors[agentId] || 'rgba(255,255,255,0.06)';
+      $('#name').textContent = custom?.name || info.name;
+      $('#role').textContent = `${custom?.role || info.role} | Lv.${affinity.level}`;
+      $('#agent-config').classList.add('hidden');
+
+      // Load today's history, or start fresh
+      const saved = await window.api.loadHistory(agentId);
+      if (saved && saved.length > 0) {
+        history = saved;
+      } else {
+        history = [{ role: 'assistant', content: greetings[agentId] }];
+      }
+      renderMessages();
+
+      $('#chat-view').classList.remove('hidden');
+      $('#settings-view').classList.add('hidden');
+
+      setTimeout(() => $('#input').focus(), 150);
+    }
+
+    // Read agent from URL query parameter
+    const urlParams = new URLSearchParams(window.location.search);
+    const agentFromUrl = urlParams.get('agent');
+    if (agentFromUrl) {
+      initChat(agentFromUrl);
+    }
+
+    // Close
+    $('#close-btn').addEventListener('click', () => window.api.closeChat());
+
+    $('#settings-close').addEventListener('click', () => window.api.closeChat());
+
+    // 캐릭터 설정 패널
+    $('#agent-settings-btn').addEventListener('click', async () => {
+      const panel = $('#agent-config');
+      if (!panel.classList.contains('hidden')) {
+        panel.classList.add('hidden');
+        return;
+      }
+      const [custom, affinity, defaultRole] = await Promise.all([
+        window.api.getAgentCustom(currentAgent),
+        window.api.getAffinity(currentAgent),
+        window.api.getDefaultRole(currentAgent),
+      ]);
+      const defaults = agentsInfo[currentAgent];
+      $('#config-name').value = custom?.name || defaults.name;
+      $('#config-role').value = custom?.role || defaultRole;
+      $('#config-avatar').src = getAgentImg(currentAgent, affinity.level);
+      panel.classList.remove('hidden');
+    });
+
+    // 이미지 변경
+    const pickImage = async () => {
+      const result = await window.api.pickAgentImage(currentAgent);
+      if (result?.success) {
+        // 캐시 무효화를 위해 타임스탬프 추가
+        const ts = Date.now();
+        const affinity = await window.api.getAffinity(currentAgent);
+        const newSrc = getAgentImg(currentAgent, affinity.level) + '?t=' + ts;
+        $('#config-avatar').src = newSrc;
+        $('#avatar').src = newSrc;
+      }
+    };
+    $('#config-img-btn').addEventListener('click', pickImage);
+    $('#config-avatar').addEventListener('click', pickImage);
+
+    $('#config-save').addEventListener('click', async () => {
+      const name = $('#config-name').value.trim();
+      const role = $('#config-role').value.trim();
+      if (!name) return;
+      await window.api.setAgentCustom({ agentId: currentAgent, name, role });
+      $('#name').textContent = name;
+      const affinity = await window.api.getAffinity(currentAgent);
+      $('#role').textContent = `${role} | Lv.${affinity.level}`;
+      $('#agent-config').classList.add('hidden');
+    });
+
+    $('#config-reset').addEventListener('click', async () => {
+      await window.api.resetAgentCustom(currentAgent);
+      const defaults = agentsInfo[currentAgent];
+      const [affinity, defaultRole] = await Promise.all([
+        window.api.getAffinity(currentAgent),
+        window.api.getDefaultRole(currentAgent),
+      ]);
+      $('#name').textContent = defaults.name;
+      $('#role').textContent = `${defaults.role} | Lv.${affinity.level}`;
+      $('#config-name').value = defaults.name;
+      $('#config-role').value = defaultRole;
+      $('#agent-config').classList.add('hidden');
+    });
+
+    // Send message
+    async function sendMessage() {
+      const text = $('#input').value.trim();
+      if (!text || !currentAgent || isSending) return;
+
+      isSending = true;
+      $('#input').value = '';
+      $('#input').style.height = 'auto';
+      $('#send-btn').disabled = true;
+
+      history.push({ role: 'user', content: text });
+      renderMessages();
+
+      const agentName = $('#name').textContent;
+      const loadingMsg = { role: 'assistant', content: `${agentName} 생각 중`, loading: true };
+      history.push(loadingMsg);
+      renderMessages();
+
+      try {
+        const apiMessages = history
+          .filter(m => !m.loading)
+          .slice(-20)
+          .map(m => ({ role: m.role, content: m.content }));
+
+        const response = await window.api.chat(currentAgent, apiMessages);
+        const idx = history.indexOf(loadingMsg);
+        if (idx !== -1) history.splice(idx, 1);
+        history.push({ role: 'assistant', content: response });
+      } catch (err) {
+        const idx = history.indexOf(loadingMsg);
+        if (idx !== -1) history.splice(idx, 1);
+        history.push({ role: 'assistant', content: err.message || '오류가 발생했어요.', error: true });
+      }
+
+      renderMessages();
+      // Save history + update affinity display
+      const saveable = history.filter(m => !m.loading && !m.error);
+      window.api.saveHistory(currentAgent, saveable);
+      const [newAffinity, newCustom] = await Promise.all([
+        window.api.getAffinity(currentAgent),
+        window.api.getAgentCustom(currentAgent),
+      ]);
+      $('#avatar').src = getAgentImg(currentAgent, newAffinity.level);
+      const displayRole = newCustom?.role || agentsInfo[currentAgent].role;
+      $('#role').textContent = `${displayRole} | Lv.${newAffinity.level}`;
+
+      isSending = false;
+      $('#send-btn').disabled = false;
+      $('#input').focus();
+    }
+
+    $('#send-btn').addEventListener('click', sendMessage);
+
+    // Handle Korean IME properly
+    let composing = false;
+    $('#input').addEventListener('compositionstart', () => { composing = true; });
+    $('#input').addEventListener('compositionend', () => { composing = false; });
+    $('#input').addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey && !composing && !e.isComposing) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+
+    // Auto-resize textarea
+    $('#input').addEventListener('input', function() {
+      this.style.height = 'auto';
+      this.style.height = Math.min(this.scrollHeight, 100) + 'px';
+    });
+
+    // Open links in external browser
+    document.addEventListener('click', e => {
+      const link = e.target.closest('.ext-link');
+      if (link) {
+        e.preventDefault();
+        window.api.openExternal(link.dataset.url);
+      }
+    });
+
+    // Escape to close
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') window.api.closeChat();
+    });
+  </script>
+</body>
+</html>
