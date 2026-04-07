@@ -432,13 +432,19 @@
       initChat(agentFromUrl);
     }
 
-    // Close
-    $('#close-btn').addEventListener('click', () => window.api.closeChat());
+    // Close — mousedown 사용 (drag 영역 내 no-drag 버튼 클릭 문제 해결)
+    $('#close-btn').addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      window.api.closeChat();
+    });
 
     $('#settings-close').addEventListener('click', () => window.api.closeChat());
 
     // 캐릭터 설정 패널
-    $('#agent-settings-btn').addEventListener('click', async () => {
+    $('#agent-settings-btn').addEventListener('mousedown', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
       if (!currentAgent) return;
       const panel = $('#agent-config');
       if (!panel.classList.contains('hidden')) {
