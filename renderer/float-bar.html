@@ -165,11 +165,11 @@
     };
 
     const defaultAgentNames = {
-      panda: '팬더 - 게임대결',
-      monkey: '펀치 - 용기충전',
-      cat: '야옹이 - 플레이리스트',
       capybara: '카피바라 - 실시간핫이슈',
-      nureong: '벨루가 - 웃긴이야기',
+      panda: '푸바오 - 점심메뉴추천',
+      cat: '고양이 - 플레이리스트',
+      monkey: '펀치 - 용기충전',
+      nureong: '누렁이 - 웃긴이야기',
     };
 
     async function buildBar() {
@@ -201,7 +201,7 @@
         btn.className = 'agent-btn';
         btn.dataset.agent = agentId;
         btn.dataset.name = `${displayName} (Lv.${level})`;
-        btn.draggable = true;
+        btn.draggable = false;
         btn.style.background = agentColors[agentId] || 'rgba(255, 255, 255, 0.06)';
         btn.innerHTML = `
           <img src="../assets/${agentId}-lv${level}.png" alt="${agentId}">

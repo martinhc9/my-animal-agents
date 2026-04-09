@@ -1,7 +1,9 @@
 const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, screen, shell, protocol, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { execSync, spawn } = require('child_process');
 const Store = require('electron-store');
+
 
 const store = new Store();
 let tray = null;
@@ -11,9 +13,17 @@ let chatWindow = null;
 // RSS 뉴스 캐시 (카피바라용)
 const newsCache = { capybara: null };
 
+// 식당 목록 (점메추봇용)
+let restaurantList = [];
+try {
+  restaurantList = JSON.parse(fs.readFileSync(path.join(__dirname, 'assets', 'restaurants.json'), 'utf-8'));
+} catch (e) {
+  console.error('[Restaurants] 식당 목록 로드 실패:', e.message);
+}
+
 // Ollama 설정
 const OLLAMA_BASE = 'http://127.0.0.1:11434';
-const DEFAULT_MODEL = 'korean-agent';
+const DEFAULT_MODEL = 'korean-agent-e2b'; // e2b 테스트
 let ollamaReady = false;
 
 // --- 다마고치 시스템 ---
@@ -112,35 +122,6 @@ AI: ${assistantResponse}
   } catch { /* 메모리 추출 실패해도 무시 */ }
 }
 
-// --- 응답 프리캐시 (카피바라 제외) ---
-// 각 캐릭터별 미리 생성된 응답 3개씩 보관
-const responseCache = new Map(); // agentId → [string, string, string]
-
-async function prefillCache(agentId) {
-  const cache = responseCache.get(agentId) || [];
-  if (cache.length >= 3) return;
-
-  const needed = 3 - cache.length;
-  console.log(`[Cache] ${agentId}: ${needed}개 프리캐시 시작`);
-
-  const prompts = {
-    panda: '재미있는 퀴즈 하나 내줘. 4지선다로.',
-    monkey: '오늘 힘든 하루를 보낸 사람에게 위로 한마디 해줘.',
-    cat: '기분 좋아지는 노래 3곡 추천해줘. 유튜브 링크도.',
-    capybara: '지금 뭐가 핫해?',
-    nureong: '진짜 웃긴 일상 이야기 하나 들려줘. 컬투쇼 사연 느낌으로.',
-  };
-
-  for (let i = 0; i < needed; i++) {
-    try {
-      const systemPrompt = await buildSystemPrompt(agentId);
-      const content = await ollamaChat(systemPrompt, [{ role: 'user', content: prompts[agentId] || '안녕' }]);
-      cache.push(content);
-      responseCache.set(agentId, cache);
-      console.log(`[Cache] ${agentId}: ${cache.length}/3`);
-    } catch { break; }
-  }
-}
 
 // --- Ollama API ---
 async function ollamaChat(systemPrompt, messages, onToken) {
@@ -175,8 +156,10 @@ async function ollamaChat(systemPrompt, messages, onToken) {
     return data.message.content;
   }
 
-  // 스트리밍 모드
+  // 스트리밍 모드 (쓰로틀링: 50ms 간격으로 UI 업데이트)
   let fullContent = '';
+  let lastSent = 0;
+  let pendingFlush = null;
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   while (true) {
@@ -189,11 +172,24 @@ async function ollamaChat(systemPrompt, messages, onToken) {
         const json = JSON.parse(line);
         if (json.message?.content) {
           fullContent += json.message.content;
-          onToken(fullContent);
+          const now = Date.now();
+          if (now - lastSent >= 50) {
+            if (pendingFlush) { clearTimeout(pendingFlush); pendingFlush = null; }
+            onToken(fullContent);
+            lastSent = now;
+          } else if (!pendingFlush) {
+            pendingFlush = setTimeout(() => {
+              onToken(fullContent);
+              lastSent = Date.now();
+              pendingFlush = null;
+            }, 50 - (now - lastSent));
+          }
         }
       } catch {}
     }
   }
+  if (pendingFlush) { clearTimeout(pendingFlush); }
+  onToken(fullContent); // 마지막 상태 확실히 전달
   return fullContent;
 }
 
@@ -253,12 +249,8 @@ function createFloatBar() {
 
   floatBar.loadFile(path.join(__dirname, 'renderer', 'float-bar.html'));
   floatBar.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  const pinned = store.get('bar-pinned', true);
-  if (!pinned) {
-    floatBar.hide();
-  } else {
-    floatBar.setIgnoreMouseEvents(false);
-  }
+  // 기본: 숨김 상태, hover로만 나타남
+  floatBar.hide();
 
   const saveBounds = () => {
     if (floatBar && !floatBar.isDestroyed()) {
@@ -267,20 +259,72 @@ function createFloatBar() {
   };
   floatBar.on('moved', saveBounds);
   floatBar.on('resized', saveBounds);
+}
 
-  floatBar.webContents.on('did-finish-load', () => {
-    // 고정 모드면 항상 클릭 가능, 아니면 hover로 전환
-    if (!pinned) {
-      floatBar.webContents.executeJavaScript(`
-        document.querySelector('.bar').addEventListener('mouseenter', () => {
-          window.api.setMouseThrough(false);
-        });
-        document.addEventListener('mouseleave', () => {
-          window.api.setMouseThrough(true);
-        });
-      `);
+// 항상표시 OFF: 마우스가 바 영역 근처면 표시, 벗어나면 숨김
+let barHoverTimer = null;
+let barFading = false; // 페이드 중 중복 방지
+function startBarHoverWatch() {
+  if (barHoverTimer) return;
+  barHoverTimer = setInterval(() => {
+    if (!floatBar || floatBar.isDestroyed() || barFading) return;
+
+    const cursor = screen.getCursorScreenPoint();
+    const b = floatBar.getBounds();
+    const m = 30;
+    const inside = cursor.x >= b.x - m && cursor.x <= b.x + b.width + m
+                && cursor.y >= b.y - m && cursor.y <= b.y + b.height + m;
+
+    if (hideTimer) return; // 감추기 모드 중에는 hover 무시
+
+    if (inside && !floatBar.isVisible()) {
+      // 페이드 인 (300ms easeOut)
+      barFading = true;
+      floatBar.setOpacity(0);
+      floatBar.showInactive();
+      const fadeStart = Date.now();
+      const fadeDuration = 300;
+      const fadeIn = setInterval(() => {
+        const t = Math.min(1, (Date.now() - fadeStart) / fadeDuration);
+        const ease = 1 - Math.pow(1 - t, 3); // easeOutCubic
+        if (floatBar && !floatBar.isDestroyed()) floatBar.setOpacity(ease);
+        if (t >= 1) { clearInterval(fadeIn); barFading = false; }
+      }, 8);
+    } else if (!inside && floatBar.isVisible()) {
+      if (!chatWindow || chatWindow.isDestroyed()) {
+        // 페이드 아웃 (400ms easeIn)
+        barFading = true;
+        const fadeStart = Date.now();
+        const fadeDuration = 400;
+        const fadeOut = setInterval(() => {
+          const t = Math.min(1, (Date.now() - fadeStart) / fadeDuration);
+          const ease = 1 - Math.pow(t, 3); // easeInCubic (역방향)
+          if (floatBar && !floatBar.isDestroyed()) {
+            floatBar.setOpacity(ease);
+            if (t >= 1) {
+              floatBar.hide();
+              floatBar.setOpacity(1);
+              clearInterval(fadeOut);
+              barFading = false;
+            }
+          } else { clearInterval(fadeOut); barFading = false; }
+        }, 8);
+      }
     }
-  });
+  }, 300);
+}
+startBarHoverWatch();
+
+let hideTimer = null;
+function hideBarFor(minutes) {
+  if (floatBar && !floatBar.isDestroyed()) floatBar.hide();
+  store.set('bar-pinned', false);
+  if (hideTimer) clearTimeout(hideTimer);
+  hideTimer = setTimeout(() => {
+    store.set('bar-pinned', true);
+    if (floatBar && !floatBar.isDestroyed()) floatBar.show();
+    hideTimer = null;
+  }, minutes * 60 * 1000);
 }
 
 function createTray() {
@@ -292,21 +336,20 @@ function createTray() {
     trayImage = nativeImage.createEmpty();
   }
   tray = new Tray(trayImage);
-  tray.setToolTip('My Agents');
+  tray.setToolTip('My Animal Agents');
   if (trayImage.isEmpty()) tray.setTitle('🐾');
 
+  // 트레이 아이콘 클릭 시 바 토글
+  tray.on('click', () => {
+    if (floatBar && !floatBar.isDestroyed()) {
+      // 감추기 모드 해제
+      if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+    }
+  });
+
   const trayMenu = Menu.buildFromTemplate([
-    { label: '바 보기/숨기기', click: () => {
-      if (floatBar && !floatBar.isDestroyed()) {
-        if (floatBar.isVisible()) {
-          floatBar.hide();
-          store.set('bar-pinned', false);
-        } else {
-          floatBar.show();
-          store.set('bar-pinned', true);
-        }
-      }
-    }},
+    { label: '10분간 감추기', click: () => hideBarFor(10) },
+    { label: '1시간 감추기', click: () => hideBarFor(60) },
     { label: '설정', click: () => createChatWindow('settings') },
     { label: '원위치 복귀', click: () => {
       const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
@@ -357,13 +400,12 @@ function createChatWindow(agentId) {
     x: chatX,
     y: chatY,
     frame: false,
-    resizable: true,
+    resizable: false,
     alwaysOnTop: true,
     skipTaskbar: true,
-    transparent: true,
+    transparent: false,
+    backgroundColor: '#1a1a2e',
     hasShadow: true,
-    vibrancy: 'under-window',
-    visualEffectState: 'active',
     minWidth: 320,
     minHeight: 400,
     webPreferences: {
@@ -390,9 +432,249 @@ function createChatWindow(agentId) {
 }
 
 // --- App 설정 ---
-app.dock?.hide();
+// app.dock?.hide()는 startApp()에서 호출
 
-app.whenReady().then(async () => {
+// --- 온보딩: Ollama 설치/실행/모델 체크 ---
+let setupWindow = null;
+
+// ollama 바이너리 경로 탐색
+function findOllamaBin() {
+  const candidates = [
+    '/usr/local/bin/ollama',
+    '/opt/homebrew/bin/ollama',
+    path.join(app.getPath('home'), 'Applications', 'Ollama.app', 'Contents', 'Resources', 'ollama'),
+    '/Applications/Ollama.app/Contents/Resources/ollama',
+  ];
+  try {
+    const which = execSync('which ollama', { encoding: 'utf-8' }).trim();
+    if (which) candidates.unshift(which);
+  } catch {}
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  return 'ollama'; // fallback to PATH
+}
+
+function isOllamaInstalled() {
+  try {
+    const bin = findOllamaBin();
+    execSync(`"${bin}" --version`, { encoding: 'utf-8' });
+    return true;
+  } catch { return false; }
+}
+
+async function isOllamaRunning() {
+  try {
+    const res = await fetch(`${OLLAMA_BASE}/api/tags`);
+    return res.ok;
+  } catch { return false; }
+}
+
+async function hasModel() {
+  try {
+    const res = await fetch(`${OLLAMA_BASE}/api/tags`);
+    const data = await res.json();
+    return data.models?.some(m => m.name === DEFAULT_MODEL || m.name.startsWith(DEFAULT_MODEL.split(':')[0]));
+  } catch { return false; }
+}
+
+function createSetupWindow() {
+  const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
+  setupWindow = new BrowserWindow({
+    width: 480,
+    height: 560,
+    x: Math.round(sw / 2 - 240),
+    y: Math.round(sh / 2 - 210),
+    frame: true,
+    resizable: false,
+    alwaysOnTop: true,
+    titleBarStyle: 'hiddenInset',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+  });
+  setupWindow.loadFile(path.join(__dirname, 'renderer', 'setup.html'));
+  setupWindow.on('closed', () => { setupWindow = null; });
+}
+
+function sendSetup(data) {
+  if (setupWindow && !setupWindow.isDestroyed()) {
+    setupWindow.webContents.send('setup-progress', data);
+  }
+}
+
+async function runSetup() {
+  // Step 1: Ollama 설치
+  if (!isOllamaInstalled()) {
+    sendSetup({ step: 'install', status: 'active', message: 'Ollama 다운로드 중...', progress: 0 });
+    try {
+      const tmpZip = path.join(app.getPath('temp'), 'Ollama-darwin.zip');
+      // Node.js https로 직접 다운로드 (리다이렉트 따라감)
+      await new Promise((resolve, reject) => {
+        const download = (url) => {
+          const mod = url.startsWith('https') ? require('https') : require('http');
+          mod.get(url, (res) => {
+            if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+              download(res.headers.location);
+              return;
+            }
+            if (res.statusCode !== 200) { reject(new Error(`HTTP ${res.statusCode}`)); return; }
+            const total = parseInt(res.headers['content-length'] || '0', 10);
+            let downloaded = 0;
+            const file = fs.createWriteStream(tmpZip);
+            res.on('data', (chunk) => {
+              downloaded += chunk.length;
+              if (total > 0) {
+                const pct = Math.round(downloaded / total * 100);
+                sendSetup({ step: 'install', status: 'active', progress: pct, message: `Ollama 다운로드 중... ${pct}%` });
+              }
+            });
+            res.pipe(file);
+            file.on('finish', () => { file.close(); resolve(); });
+            file.on('error', reject);
+          }).on('error', reject);
+        };
+        download('https://ollama.com/download/Ollama-darwin.zip');
+      });
+
+      sendSetup({ step: 'install', status: 'active', message: 'Ollama 설치 중...' });
+      // zip 해제
+      const tmpDir = path.join(app.getPath('temp'), 'ollama-extract');
+      await new Promise((resolve, reject) => {
+        const proc = spawn('unzip', ['-o', tmpZip, '-d', tmpDir], { stdio: 'pipe' });
+        proc.on('close', code => code === 0 ? resolve() : reject(new Error(`압축 해제 실패`)));
+        proc.on('error', reject);
+      });
+      // ~/Applications 또는 /Applications에 복사 (권한 있는 쪽으로)
+      const homeApps = path.join(app.getPath('home'), 'Applications');
+      if (!fs.existsSync(homeApps)) fs.mkdirSync(homeApps, { recursive: true });
+      let ollamaAppPath = path.join(homeApps, 'Ollama.app');
+      try {
+        await new Promise((resolve, reject) => {
+          const proc = spawn('cp', ['-R', path.join(tmpDir, 'Ollama.app'), '/Applications/'], { stdio: 'pipe' });
+          proc.on('close', code => code === 0 ? resolve() : reject(new Error('권한 없음')));
+          proc.on('error', reject);
+        });
+        ollamaAppPath = '/Applications/Ollama.app';
+      } catch {
+        // /Applications 실패 시 ~/Applications로
+        await new Promise((resolve, reject) => {
+          const proc = spawn('cp', ['-R', path.join(tmpDir, 'Ollama.app'), homeApps + '/'], { stdio: 'pipe' });
+          proc.on('close', code => code === 0 ? resolve() : reject(new Error(`복사 실패`)));
+          proc.on('error', reject);
+        });
+      }
+      // ollama serve 백그라운드 실행 (GUI 없이)
+      const ollamaBin = path.join(ollamaAppPath, 'Contents', 'Resources', 'ollama');
+      spawn(ollamaBin, ['serve'], { stdio: 'ignore', detached: true }).unref();
+      // CLI 준비 대기 (PATH에 없을 수 있으니 직접 체크도)
+      for (let i = 0; i < 30; i++) {
+        await new Promise(r => setTimeout(r, 500));
+        if (isOllamaInstalled()) break;
+        // 직접 바이너리로도 체크
+        try {
+          execSync(`"${ollamaBin}" --version`, { encoding: 'utf-8' });
+          break;
+        } catch {}
+      }
+    } catch (e) {
+      sendSetup({ step: 'install', status: 'error', message: `설치 실패: ${e.message}` });
+      return;
+    }
+  }
+  sendSetup({ step: 'install', status: 'done' });
+
+  // Step 2: Ollama 실행
+  sendSetup({ step: 'serve', status: 'active', message: 'Ollama 시작 중...' });
+  if (!(await isOllamaRunning())) {
+    // 백그라운드로 ollama serve 실행
+    const srv = spawn(findOllamaBin(), ['serve'], { stdio: 'ignore', detached: true });
+    srv.unref();
+    // 포트 열릴 때까지 대기 (최대 15초)
+    let running = false;
+    for (let i = 0; i < 30; i++) {
+      await new Promise(r => setTimeout(r, 500));
+      if (await isOllamaRunning()) { running = true; break; }
+    }
+    if (!running) {
+      sendSetup({ step: 'serve', status: 'error', message: 'Ollama 시작 실패' });
+      return;
+    }
+  }
+  sendSetup({ step: 'serve', status: 'done' });
+
+  // Step 3: gemma4 모델 다운로드
+  sendSetup({ step: 'pull', status: 'active', message: 'AI 모델 다운로드 중...', progress: 0 });
+  const hasGemma = await (async () => {
+    try {
+      const res = await fetch(`${OLLAMA_BASE}/api/tags`);
+      const data = await res.json();
+      return data.models?.some(m => m.name.startsWith('gemma4'));
+    } catch { return false; }
+  })();
+
+  if (!hasGemma) {
+    try {
+      await new Promise((resolve, reject) => {
+        const proc = spawn(findOllamaBin(), ['pull', 'gemma4:e2b'], { stdio: 'pipe' });
+        let lastPct = 0;
+        const handleData = (chunk) => {
+          const text = chunk.toString();
+          const match = text.match(/(\d+)%/);
+          if (match) {
+            lastPct = parseInt(match[1]);
+            sendSetup({ step: 'pull', status: 'active', progress: lastPct, message: `AI 모델 다운로드 중... ${lastPct}%` });
+          }
+        };
+        proc.stdout.on('data', handleData);
+        proc.stderr.on('data', handleData);
+        proc.on('close', code => code === 0 ? resolve() : reject(new Error(`exit ${code}`)));
+        proc.on('error', reject);
+      });
+    } catch (e) {
+      sendSetup({ step: 'pull', status: 'error', message: `다운로드 실패: ${e.message}` });
+      return;
+    }
+  }
+  sendSetup({ step: 'pull', status: 'done', progress: 100 });
+
+  // Step 4: korean-agent 모델 생성
+  sendSetup({ step: 'create', status: 'active', message: '에이전트 모델 생성 중...' });
+  if (!(await hasModel())) {
+    try {
+      // asar 안의 Modelfile을 임시 파일로 복사 (ollama CLI가 asar 못 읽음)
+      const modelfileSrc = path.join(__dirname, 'assets', 'Modelfile.e2b');
+      const modelfileTmp = path.join(app.getPath('temp'), 'Modelfile');
+      fs.copyFileSync(modelfileSrc, modelfileTmp);
+      await new Promise((resolve, reject) => {
+        const proc = spawn(findOllamaBin(), ['create', DEFAULT_MODEL, '-f', modelfileTmp], { stdio: 'pipe' });
+        proc.on('close', code => code === 0 ? resolve() : reject(new Error(`exit ${code}`)));
+        proc.on('error', reject);
+      });
+    } catch (e) {
+      sendSetup({ step: 'create', status: 'error', message: `모델 생성 실패: ${e.message}` });
+      return;
+    }
+  }
+  sendSetup({ step: 'create', status: 'done' });
+
+  // 완료
+  sendSetup({ step: 'done', status: 'done' });
+}
+
+ipcMain.handle('start-setup', () => runSetup());
+ipcMain.handle('setup-complete', () => {
+  if (setupWindow && !setupWindow.isDestroyed()) {
+    setupWindow.close();
+    setupWindow = null;
+  }
+  startApp();
+});
+
+async function startApp() {
+  app.dock?.hide(); // 트레이 + 바 준비된 후 Dock 숨김
   createTray();
   createFloatBar();
   // 트렌드 미리 fetch
@@ -408,14 +690,21 @@ app.whenReady().then(async () => {
         body: JSON.stringify({ model: DEFAULT_MODEL, messages: [{ role: 'user', content: '안녕' }], stream: false, think: false, options: { num_predict: 5 } }),
       });
       console.log('[Ollama] 워밍업 완료');
-      // 백그라운드 프리캐시
-      (async () => {
-        for (const id of ['panda', 'monkey', 'cat', 'capybara', 'nureong']) {
-          await prefillCache(id);
-        }
-        console.log('[Cache] 프리캐시 완료');
-      })();
     } catch { console.log('[Ollama] 워밍업 실패'); }
+  }
+}
+
+app.whenReady().then(async () => {
+  // Ollama + 모델 모두 준비됐으면 바로 시작
+  const installed = isOllamaInstalled();
+  const running = installed && (await isOllamaRunning());
+  const model = running && (await hasModel());
+
+  if (installed && running && model) {
+    startApp();
+  } else {
+    // 셋업 필요
+    createSetupWindow();
   }
 });
 
@@ -424,24 +713,27 @@ ipcMain.handle('open-agent', (_, agentId) => createChatWindow(agentId));
 ipcMain.handle('open-settings', () => createChatWindow('settings'));
 
 // 캐릭터 커스터마이징
-const DEFAULT_AGENTS_ORDER = ['panda', 'monkey', 'cat', 'capybara', 'nureong'];
+const DEFAULT_AGENTS_ORDER = ['capybara', 'panda', 'cat', 'monkey', 'nureong'];
 
-ipcMain.handle('get-agents-order', () => store.get('agents-order', DEFAULT_AGENTS_ORDER));
-ipcMain.handle('set-agents-order', (_, order) => { store.set('agents-order', order); return true; });
+ipcMain.handle('get-agents-order', () => DEFAULT_AGENTS_ORDER);
+ipcMain.handle('set-agents-order', () => true); // 순서 변경 비활성화
 
 ipcMain.handle('get-agent-custom', (_, agentId) => store.get(`custom-${agentId}`, null));
 ipcMain.handle('set-agent-custom', (_, { agentId, name, role }) => {
   store.set(`custom-${agentId}`, { name, role });
+  // 프롬프트 변경 시 메모리도 초기화 (이전 성격 기억 제거)
+  store.delete(`memory-${agentId}`);
   return true;
 });
 ipcMain.handle('reset-agent-custom', (_, agentId) => {
   store.delete(`custom-${agentId}`);
+  store.delete(`memory-${agentId}`);
   return true;
 });
 
 // 기본 역할 프롬프트
 const DEFAULT_ROLE_PROMPTS = {
-  panda: '게임 대결 친구! 사용자와 퀴즈, 끝말잇기, 넌센스 퀴즈, 초성 퀴즈, 스무고개 등 다양한 미니게임을 해줘. 처음에 "어떤 게임 할래?" 물어보고, 사용자가 고르면 바로 시작. 점수를 기록하고, 이기면 축하, 지면 도발하면서 재대결 유도해.',
+  panda: '점심 메뉴 추천 봇! 사용자의 기분, 날씨, 상황에 맞는 점심 메뉴를 추천해줘. "뭐 먹지?" 하면 바로 3가지 메뉴를 추천하고, 각 메뉴의 매력 포인트를 한 줄로 설명해. 사용자가 고민하면 하나를 콕 찍어줘.',
   monkey: '멘탈 케어 친구. 사용자의 기분을 물어보고, 위로/격려/용기를 줘. 먼저 공감하고 경청해. 힘든 이야기에는 위로를, 좋은 이야기에는 함께 기뻐해줘.',
   cat: '음악 큐레이터. 사용자의 기분/상황에 맞는 좋은 노래 3곡 추천. 실제 존재하는 유명한 곡만. 아티스트, 곡 제목, 추천 이유, 유튜브 검색 링크 포함.',
   capybara: '실시간 핫 이슈 알리미. 오늘 바로 지금 인스타, X(트위터), 커뮤니티에서 핫한 밈, 화제, 이슈를 알려줘. "지금 뭐가 핫해?" 하면 바로 답. 밈이면 설명도 해줘.',
@@ -451,6 +743,24 @@ const DEFAULT_ROLE_PROMPTS = {
 ipcMain.handle('get-default-role', (_, agentId) => DEFAULT_ROLE_PROMPTS[agentId] || '');
 
 // 이미지 변경
+// 원본 이미지 백업 디렉토리 (app.asar 밖, 사용자 데이터 폴더)
+const backupDir = path.join(app.getPath('userData'), 'originals');
+if (!fs.existsSync(backupDir)) {
+  fs.mkdirSync(backupDir, { recursive: true });
+  // 최초 1회: 현재 이미지를 원본으로 백업
+  for (const id of ['panda', 'monkey', 'cat', 'capybara', 'nureong']) {
+    for (let lv = 1; lv <= 5; lv++) {
+      const src = path.join(__dirname, 'assets', `${id}-lv${lv}.png`);
+      const dst = path.join(backupDir, `${id}-lv${lv}.png`);
+      if (fs.existsSync(src) && !fs.existsSync(dst)) fs.copyFileSync(src, dst);
+    }
+  }
+}
+
+// 커스텀 이미지 저장 디렉토리 (app.asar 밖)
+const customImgDir = path.join(app.getPath('userData'), 'custom-images');
+if (!fs.existsSync(customImgDir)) fs.mkdirSync(customImgDir, { recursive: true });
+
 ipcMain.handle('pick-agent-image', async (_, agentId) => {
   const result = await dialog.showOpenDialog({
     properties: ['openFile'],
@@ -460,10 +770,29 @@ ipcMain.handle('pick-agent-image', async (_, agentId) => {
 
   const srcPath = result.filePaths[0];
   for (let lv = 1; lv <= 5; lv++) {
-    fs.copyFileSync(srcPath, path.join(__dirname, 'assets', `${agentId}-lv${lv}.png`));
+    fs.copyFileSync(srcPath, path.join(customImgDir, `${agentId}-lv${lv}.png`));
   }
+  store.set(`custom-image-${agentId}`, true);
   if (floatBar && !floatBar.isDestroyed()) floatBar.webContents.reload();
+  if (chatWindow && !chatWindow.isDestroyed()) chatWindow.webContents.reload();
   return { success: true };
+});
+
+ipcMain.handle('reset-agent-image', (_, agentId) => {
+  for (let lv = 1; lv <= 5; lv++) {
+    const custom = path.join(customImgDir, `${agentId}-lv${lv}.png`);
+    if (fs.existsSync(custom)) fs.unlinkSync(custom);
+  }
+  store.delete(`custom-image-${agentId}`);
+  if (floatBar && !floatBar.isDestroyed()) floatBar.webContents.reload();
+  return true;
+});
+
+// 이미지 경로 해결: 커스텀 이미지가 있으면 그것, 없으면 원본
+ipcMain.handle('get-agent-image-path', (_, agentId, level) => {
+  const custom = path.join(customImgDir, `${agentId}-lv${level}.png`);
+  if (store.get(`custom-image-${agentId}`) && fs.existsSync(custom)) return custom;
+  return path.join(__dirname, 'assets', `${agentId}-lv${level}.png`);
 });
 
 // Chat history
@@ -480,7 +809,9 @@ ipcMain.handle('save-history', (_, { agentId, messages }) => {
 ipcMain.handle('open-external', async (_, url) => { await shell.openExternal(url); });
 
 ipcMain.handle('set-mouse-through', (_, through) => {
-  if (floatBar && !floatBar.isDestroyed()) floatBar.setIgnoreMouseEvents(through, { forward: true });
+  if (floatBar && !floatBar.isDestroyed()) {
+    floatBar.setIgnoreMouseEvents(through, { forward: true });
+  }
 });
 
 ipcMain.handle('move-bar-by', (_, dx, dy) => {
@@ -568,7 +899,7 @@ async function fetchRealtimeTrends() {
     const items = [];
     const re = /<item>([\s\S]*?)<\/item>/g;
     let m;
-    while ((m = re.exec(xml)) !== null && items.length < 5) {
+    while ((m = re.exec(xml)) !== null && items.length < 3) {
       const x = m[1];
       const keyword = (x.match(/<title>([\s\S]*?)<\/title>/) || [])[1] || '';
       const traffic = (x.match(/<ht:approx_traffic>([\s\S]*?)<\/ht:approx_traffic>/) || [])[1] || '';
@@ -611,14 +942,14 @@ async function buildSystemPrompt(agent) {
   }
 
   const prompts = {
-    panda: `너는 "팬더"라는 이름의 판다 게임 대결 친구야. 활발하고 승부욕 강한 캐릭터.\n역할: 사용자와 퀴즈, 끝말잇기, 넌센스 퀴즈, 초성 퀴즈, 스무고개 등 미니게임을 해줘.\n처음에 "어떤 게임 할래? 🎮" 물어봐. 점수 기록하고, 이기면 축하, 지면 도발!\n오늘: ${today}${ctx}\n한국어로 답변해.`,
+    panda: `너는 "푸바오"라는 이름의 판다 점심 메뉴 추천 봇이야. 친근하고 맛집에 빠삭한 캐릭터.\n역할: 아래 식당 목록에서 사용자의 기분, 날씨, 상황에 맞는 점심 메뉴를 추천해줘.\n"뭐 먹지?" 하면 3가지 식당을 추천하고 각각 매력 포인트 한 줄. 고민하면 하나를 콕 찍어줘.\n반드시 아래 목록에 있는 식당만 추천해.\n\n[식당 목록]\n${restaurantList.map(r => `${r.name}(${r.type})`).join(', ')}\n\n오늘: ${today}${ctx}\n한국어로 답변해.`,
     monkey: `너는 "펀치"라는 이름의 원숭이 멘탈 케어 친구야.\n역할: 사용자의 기분을 물어보고, 위로/격려/용기를 줘.\n오늘: ${today}${ctx}\n한국어로 답변해.`,
-    cat: `너는 "야옹이"라는 이름의 고양이 음악 큐레이터야.\n역할: 사용자의 기분/상황에 맞는 좋은 노래 3곡을 추천해줘.\n실제로 존재하는 유명한 곡만 추천해.\n각 곡마다: 아티스트 - 곡 제목, 추천 이유 한 줄, 유튜브 검색 링크(https://www.youtube.com/results?search_query=아티스트+곡제목 형태)\n한국 노래와 팝송을 섞어줘.\n오늘: ${today}${ctx}\n한국어로 답변해.`,
+    cat: `너는 "고양이"라는 이름의 고양이 음악 큐레이터야.\n역할: 사용자의 기분/상황에 맞는 좋은 노래 3곡을 추천해줘.\n실제로 존재하는 유명한 곡만 추천해.\n각 곡마다: 아티스트 - 곡 제목, 추천 이유 한 줄, 유튜브 검색 링크(https://www.youtube.com/results?search_query=아티스트+곡제목 형태)\n한국 노래와 팝송을 섞어줘.\n오늘: ${today}${ctx}\n한국어로 답변해.`,
     capybara: `CAPYBARA_PLACEHOLDER`,
-    nureong: `너는 "벨루가"라는 이름의 흰고래 이야기꾼이야. 느긋하고 재밌는 톤.\n역할: 컬투쇼 레전드 사연 같은 진짜 웃긴 일상 이야기를 들려줘. 공감 가고, 반전 있고, 빵 터지는 실제 에피소드 스타일. 한 번에 1개씩.\n오늘: ${today}${ctx}\n19금 금지. 한국어로 답변해.`,
+    nureong: `너는 "누렁이"라는 이름의 강아지 이야기꾼이야. 느긋하고 재밌는 톤.\n역할: 컬투쇼 레전드 사연 같은 진짜 웃긴 일상 이야기를 들려줘. 공감 가고, 반전 있고, 빵 터지는 실제 에피소드 스타일. 한 번에 1개씩.\n오늘: ${today}${ctx}\n19금 금지. 한국어로 답변해.`,
   };
 
-  // 판다는 게임 대결로 변경됨 — HR 뉴스 fetch 불필요
+  // 판다는 점메추봇으로 변경됨 — HR 뉴스 fetch 불필요
 
   if (agent === 'capybara') {
     if (!newsCache.capybara) newsCache.capybara = await fetchRealtimeTrends();
@@ -658,27 +989,7 @@ ipcMain.handle('chat', async (_, { agent, messages }) => {
   }
 
   // 캐시에 미리 생성된 응답이 있으면 즉시 사용 (첫 메시지일 때)
-  const cache = responseCache.get(agent) || [];
-  if (cache.length > 0 && messages.length <= 2) {
-    const cached = cache.shift();
-    responseCache.set(agent, cache);
-    // 캐시 보충 (백그라운드)
-    prefillCache(agent);
-
-    pendingChats.set(agent, { status: 'done', content: cached });
-    addXP(agent);
-    const saved = store.get(historyKey, []);
-    saved.push({ role: 'assistant', content: cached });
-    store.set(historyKey, saved);
-    if (chatWindow && !chatWindow.isDestroyed()) {
-      chatWindow.webContents.send('chat-response', { agent, content: cached });
-    }
-    const userMsg = lastUserMsg?.content || '';
-    if (userMsg) extractMemory(agent, userMsg, cached);
-    return { status: 'processing' };
-  }
-
-  // 캐시 없으면 실시간 생성
+  // 실시간 생성
   pendingChats.set(agent, { status: 'loading' });
 
   (async () => {

@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>My Animal Agents - Setup</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #1a1a2e;
+      color: #e0e0e0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 40px;
+      -webkit-app-region: drag;
+      user-select: none;
+    }
+    .logo { font-size: 64px; margin-bottom: 16px; }
+    h1 { font-size: 22px; font-weight: 700; margin-bottom: 8px; }
+    .subtitle { font-size: 13px; color: #888; margin-bottom: 32px; }
+
+    .steps { width: 100%; max-width: 360px; }
+    .step {
+      display: flex; align-items: center; gap: 12px;
+      padding: 10px 0;
+      font-size: 14px;
+      color: #666;
+      transition: color 0.3s;
+    }
+    .step.active { color: #e0e0e0; }
+    .step.done { color: #10b981; }
+    .step.error { color: #f87171; }
+    .step-icon {
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px;
+      background: rgba(255,255,255,0.06);
+      flex-shrink: 0;
+    }
+    .step.active .step-icon { background: rgba(99,102,241,0.2); }
+    .step.done .step-icon { background: rgba(16,185,129,0.2); }
+    .step.error .step-icon { background: rgba(248,113,113,0.2); }
+
+    .progress-container {
+      width: 100%; max-width: 360px;
+      margin-top: 20px;
+    }
+    .progress-bar {
+      width: 100%; height: 6px;
+      background: rgba(255,255,255,0.08);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #6366f1, #8b5cf6);
+      border-radius: 3px;
+      width: 0%;
+      transition: width 0.3s;
+    }
+    .progress-text {
+      font-size: 12px; color: #888;
+      margin-top: 8px;
+      text-align: center;
+      min-height: 18px;
+    }
+
+    .btn-start {
+      -webkit-app-region: no-drag;
+      margin-top: 24px;
+      padding: 12px 40px;
+      border-radius: 12px;
+      border: none;
+      background: #6366f1;
+      color: white;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      display: none;
+    }
+    .btn-start:hover { background: #4f46e5; }
+    .btn-start.show { display: block; }
+
+    .btn-retry {
+      -webkit-app-region: no-drag;
+      margin-top: 12px;
+      padding: 10px 30px;
+      border-radius: 10px;
+      border: 1px solid rgba(248,113,113,0.4);
+      background: transparent;
+      color: #f87171;
+      font-size: 13px;
+      cursor: pointer;
+      display: none;
+    }
+    .btn-retry.show { display: block; }
+
+    .btn-link {
+      -webkit-app-region: no-drag;
+      margin-top: 8px;
+      background: none;
+      border: none;
+      color: #6366f1;
+      font-size: 12px;
+      cursor: pointer;
+      text-decoration: underline;
+      display: none;
+    }
+    .btn-link.show { display: block; }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .spinner {
+      display: inline-block;
+      width: 14px; height: 14px;
+      border: 2px solid rgba(99,102,241,0.3);
+      border-top-color: #6366f1;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+  </style>
+</head>
+<body>
+  <div class="logo">🐾</div>
+  <h1>My Animal Agents</h1>
+  <p class="subtitle">AI 에이전트를 사용하려면 초기 설정이 필요합니다</p>
+
+  <div class="steps">
+    <div class="step" id="step-install">
+      <div class="step-icon" id="icon-install">1</div>
+      <span>Ollama 설치</span>
+    </div>
+    <div class="step" id="step-serve">
+      <div class="step-icon" id="icon-serve">2</div>
+      <span>Ollama 시작</span>
+    </div>
+    <div class="step" id="step-pull">
+      <div class="step-icon" id="icon-pull">3</div>
+      <span>AI 모델 다운로드 <small style="color:#888">(~5GB)</small></span>
+    </div>
+    <div class="step" id="step-create">
+      <div class="step-icon" id="icon-create">4</div>
+      <span>에이전트 모델 생성</span>
+    </div>
+  </div>
+
+  <div class="progress-container">
+    <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+    <div class="progress-text" id="progress-text"></div>
+  </div>
+
+  <button class="btn-start" id="btn-start">설치 시작</button>
+  <button class="btn-retry" id="btn-retry">다시 시도</button>
+  <button class="btn-link" id="btn-manual">ollama.com에서 수동 설치</button>
+
+  <script>
+    const $ = s => document.querySelector(s);
+
+    const steps = ['install', 'serve', 'pull', 'create'];
+
+    function setStep(name, state, iconText) {
+      const el = $(`#step-${name}`);
+      const icon = $(`#icon-${name}`);
+      el.className = `step ${state}`;
+      if (iconText) icon.innerHTML = iconText;
+      else if (state === 'active') icon.innerHTML = '<div class="spinner"></div>';
+      else if (state === 'done') icon.textContent = '✓';
+    }
+
+    function setProgress(pct, text) {
+      $('#progress-fill').style.width = `${pct}%`;
+      $('#progress-text').textContent = text || '';
+    }
+
+    // 메인 프로세스에서 진행 상황 수신
+    window.api.onSetupProgress((data) => {
+      const { step, status, progress, message } = data;
+
+      if (step && status) {
+        setStep(step, status);
+      }
+
+      if (progress !== undefined) {
+        setProgress(progress, message);
+      } else if (message) {
+        $('#progress-text').textContent = message;
+      }
+
+      // 완료
+      if (step === 'done') {
+        setProgress(100, '설치 완료! 잠시 후 시작합니다...');
+        setTimeout(() => window.api.setupComplete(), 1500);
+      }
+
+      // 에러
+      if (status === 'error') {
+        $('#btn-retry').classList.add('show');
+        if (step === 'install') {
+          $('#btn-manual').classList.add('show');
+        }
+      }
+    });
+
+    // 시작 버튼
+    $('#btn-start').classList.add('show');
+    $('#btn-start').addEventListener('click', () => {
+      $('#btn-start').classList.remove('show');
+      $('#btn-retry').classList.remove('show');
+      $('#btn-manual').classList.remove('show');
+      // 모든 step 초기화
+      steps.forEach(s => setStep(s, '', s === 'install' ? '1' : s === 'serve' ? '2' : s === 'pull' ? '3' : '4'));
+      setProgress(0, '');
+      window.api.startSetup();
+    });
+
+    // 재시도
+    $('#btn-retry').addEventListener('click', () => {
+      $('#btn-retry').classList.remove('show');
+      $('#btn-manual').classList.remove('show');
+      steps.forEach(s => setStep(s, '', s === 'install' ? '1' : s === 'serve' ? '2' : s === 'pull' ? '3' : '4'));
+      setProgress(0, '');
+      window.api.startSetup();
+    });
+
+    // 수동 설치 링크
+    $('#btn-manual').addEventListener('click', () => {
+      window.api.openExternal('https://ollama.com/download');
+    });
+  </script>
+</body>
+</html>

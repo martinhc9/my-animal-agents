@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld('api', {
   setAgentCustom: (data) => ipcRenderer.invoke('set-agent-custom', data),
   resetAgentCustom: (agentId) => ipcRenderer.invoke('reset-agent-custom', agentId),
   pickAgentImage: (agentId) => ipcRenderer.invoke('pick-agent-image', agentId),
+  resetAgentImage: (agentId) => ipcRenderer.invoke('reset-agent-image', agentId),
   getDefaultRole: (agentId) => ipcRenderer.invoke('get-default-role', agentId),
   onBarLayout: (callback) => ipcRenderer.on('bar-layout', (_, layout) => callback(layout)),
   onBarPinned: (callback) => ipcRenderer.on('bar-pinned', (_, v) => callback(v)),
@@ -34,4 +35,8 @@ contextBridge.exposeInMainWorld('api', {
   getPendingChat: (agentId) => ipcRenderer.invoke('get-pending-chat', agentId),
   onChatResponse: (callback) => ipcRenderer.on('chat-response', (_, data) => callback(data)),
   onChatStream: (callback) => ipcRenderer.on('chat-stream', (_, data) => callback(data)),
+  // Setup
+  startSetup: () => ipcRenderer.invoke('start-setup'),
+  setupComplete: () => ipcRenderer.invoke('setup-complete'),
+  onSetupProgress: (callback) => ipcRenderer.on('setup-progress', (_, data) => callback(data)),
 });

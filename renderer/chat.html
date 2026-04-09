@@ -157,7 +157,7 @@
       flex-shrink: 0;
     }
 
-    textarea {
+    #input {
       flex: 1;
       padding: 10px 14px;
       border-radius: 20px;
@@ -166,13 +166,11 @@
       color: var(--text);
       font-size: 13.5px;
       font-family: inherit;
-      resize: none;
       outline: none;
-      max-height: 100px;
       line-height: 1.4;
       transition: border-color 0.2s;
     }
-    textarea:focus { border-color: rgba(99,102,241,0.4); }
+    #input:focus { border-color: rgba(99,102,241,0.4); }
 
     .btn-send {
       width: 36px; height: 36px;
@@ -275,11 +273,15 @@
             background:transparent;color:var(--text-secondary);font-size:12px;cursor:pointer;
           ">초기화</button>
         </div>
+        <button id="config-clear-history" style="
+          margin-top:4px;padding:8px;border-radius:8px;border:1px solid rgba(239,68,68,0.3);
+          background:transparent;color:#f87171;font-size:11px;cursor:pointer;width:100%;
+        ">대화 내용 리셋</button>
       </div>
 
       <div class="messages" id="messages"></div>
       <div class="input-area">
-        <textarea id="input" placeholder="메시지를 입력하세요..." rows="1"></textarea>
+        <input type="text" id="input" placeholder="메시지를 입력하세요...">
         <button class="btn-send" id="send-btn">↑</button>
       </div>
     </div>
@@ -288,16 +290,6 @@
       <div style="font-size:40px;margin-bottom:8px;">🐾</div>
       <h2>에이전트 설정</h2>
       <div id="model-status" style="font-size:13px;min-height:20px;text-align:center;margin-bottom:8px;"></div>
-      <div style="width:100%;display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-        <span style="font-size:12px;font-weight:600;color:var(--text-secondary);">항상 표시</span>
-        <button id="pin-toggle" style="
-          width:44px;height:24px;border-radius:12px;border:none;cursor:pointer;
-          position:relative;transition:background 0.2s;
-        "><span style="
-          width:20px;height:20px;border-radius:50%;background:white;
-          position:absolute;top:2px;transition:left 0.2s;
-        "></span></button>
-      </div>
       <div style="width:100%;font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">바 위치</div>
       <div style="width:100%;display:grid;grid-template-columns:1fr 1fr;gap:6px;" id="position-grid">
         <button class="pos-btn" data-pos="top" style="padding:10px;border-radius:10px;border:1px solid var(--border);background:transparent;color:var(--text-secondary);cursor:pointer;font-size:12px;">위</button>
@@ -311,11 +303,11 @@
 
   <script>
     const agentsInfo = {
-      panda:    { name: '팬더', role: '게임대결' },
-      monkey:   { name: '펀치', role: '용기충전' },
-      cat:      { name: '야옹이', role: '플레이리스트' },
       capybara: { name: '카피바라', role: '실시간핫이슈' },
-      nureong:  { name: '벨루가', role: '웃긴이야기' },
+      panda:    { name: '푸바오', role: '점심메뉴추천' },
+      cat:      { name: '고양이', role: '플레이리스트' },
+      monkey:   { name: '펀치', role: '용기충전' },
+      nureong:  { name: '누렁이', role: '웃긴이야기' },
     };
 
     function getAgentImg(agentId, level) {
@@ -331,11 +323,11 @@
     };
 
     const greetings = {
-      panda: '안녕! 나는 팬더야 🎮 나랑 게임 한판 할래? 끝말잇기, 퀴즈, 초성게임, 스무고개... 뭐가 좋아?',
-      monkey: '안녕~ 나는 펀치야 🐵 오늘 하루는 어땠어? 기분이 어떤지 편하게 얘기해줘.',
-      cat: '안녕! 나는 야옹이야 🎵 오늘은 어떤 하루야? 분위기를 알려주면 딱 맞는 플레이리스트를 만들어줄게!',
       capybara: '안녕~ 나는 카피바라야 🔥 지금 인스타랑 X에서 뭐가 핫한지 알려줄까?',
-      nureong: '안녕~ 나는 벨루가야 🐋 진짜 웃긴 이야기 들려줄까? 컬투쇼 사연급으로!',
+      panda: '안녕! 나는 푸바오야 🍱 오늘 점심 뭐 먹을지 고민이야? 기분이나 상황 알려주면 딱 맞는 식당 추천해줄게!',
+      cat: '안녕! 나는 고양이야 🎵 오늘은 어떤 하루야? 분위기를 알려주면 딱 맞는 플레이리스트를 만들어줄게!',
+      monkey: '안녕~ 나는 펀치야 🐵 오늘 하루는 어땠어? 기분이 어떤지 편하게 얘기해줘.',
+      nureong: '안녕~ 나는 누렁이야 🐋 진짜 웃긴 이야기 들려줄까? 컬투쇼 사연급으로!',
     };
 
     let currentAgent = null;
@@ -392,7 +384,7 @@
           window.api.getBarPosition(),
           window.api.getBarPinned(),
         ]);
-        updatePinUI(pinned);
+        // updatePinUI 제거됨 (항상표시 삭제)
         if (status.ready) {
           $('#model-status').textContent = 'AI 정상 작동 중';
           $('#model-status').style.color = '#10b981';
@@ -473,17 +465,6 @@
     });
 
     // 핀(고정) 토글
-    const pinBtn = $('#pin-toggle');
-    function updatePinUI(pinned) {
-      pinBtn.style.background = pinned ? '#10b981' : 'rgba(255,255,255,0.15)';
-      pinBtn.querySelector('span').style.left = pinned ? '22px' : '2px';
-    }
-    pinBtn.addEventListener('mousedown', async (e) => {
-      e.preventDefault();
-      const current = await window.api.getBarPinned();
-      await window.api.setBarPinned(!current);
-      updatePinUI(!current);
-    });
 
     // 바 위치 설정
     document.querySelectorAll('.pos-btn').forEach(btn => {
@@ -552,12 +533,27 @@
       await window.api.setAgentCustom({ agentId: currentAgent, name, role });
       $('#name').textContent = name;
       const affinity = await window.api.getAffinity(currentAgent);
-      $('#role').textContent = `${agentsInfo[currentAgent].role} | Lv.${affinity.level}`;
+      $('#role').textContent = `${role.slice(0, 20)} | Lv.${affinity.level}`;
+      // 대화 내역 자동 리셋
+      const greeting = `안녕! 나는 ${name}이야. 새로운 역할로 바꿨어! 뭐든 물어봐.`;
+      history = [{ role: 'assistant', content: greeting }];
+      await window.api.saveHistory(currentAgent, history);
+      renderMessages();
+      $('#agent-config').classList.add('hidden');
+    });
+
+    $('#config-clear-history').addEventListener('click', async () => {
+      if (!currentAgent) return;
+      const greeting = greetings[currentAgent] || '안녕!';
+      history = [{ role: 'assistant', content: greeting }];
+      await window.api.saveHistory(currentAgent, history);
+      renderMessages();
       $('#agent-config').classList.add('hidden');
     });
 
     $('#config-reset').addEventListener('click', async () => {
       await window.api.resetAgentCustom(currentAgent);
+      await window.api.resetAgentImage(currentAgent);
       const defaults = agentsInfo[currentAgent];
       const [affinity, defaultRole] = await Promise.all([
         window.api.getAffinity(currentAgent),
@@ -567,6 +563,9 @@
       $('#role').textContent = `${defaults.role} | Lv.${affinity.level}`;
       $('#config-name').value = defaults.name;
       $('#config-role').value = defaultRole;
+      // 이미지도 원본으로 복원
+      $('#avatar').src = `../assets/${currentAgent}-lv${affinity.level}.png?t=${Date.now()}`;
+      $('#config-avatar').src = `../assets/${currentAgent}-lv${affinity.level}.png?t=${Date.now()}`;
       $('#agent-config').classList.add('hidden');
     });
 
@@ -616,9 +615,11 @@
       if (!text || !currentAgent || isSending) return;
 
       isSending = true;
-      $('#input').value = '';
-      $('#input').style.height = 'auto';
       $('#send-btn').disabled = true;
+      // 한글 IME 조합 완전 해제 후 클리어
+      const inp = $('#input');
+      inp.blur();
+      setTimeout(() => { inp.value = ''; inp.focus(); }, 50);
 
       history.push({ role: 'user', content: text });
       renderMessages();
@@ -647,13 +648,21 @@
       startPolling();
     }
 
-    // 스트리밍: 토큰이 올 때마다 로딩 메시지를 실시간 업데이트
+    // 스트리밍: 마지막 로딩 메시지만 텍스트 교체 (전체 DOM 리렌더 방지)
     window.api.onChatStream((data) => {
       if (data.agent !== currentAgent) return;
       const loadingIdx = history.findIndex(m => m.loading);
       if (loadingIdx !== -1) {
         history[loadingIdx] = { role: 'assistant', content: data.partial, loading: true };
-        renderMessages();
+        // 전체 renderMessages() 대신 해당 메시지 엘리먼트만 업데이트
+        const container = $('#messages');
+        const msgEl = container.children[loadingIdx];
+        if (msgEl) {
+          msgEl.innerHTML = `<span>${escapeHtml(data.partial)}</span><span class="typing-dots"></span>`;
+          container.scrollTop = container.scrollHeight;
+        } else {
+          renderMessages();
+        }
       }
     });
 
@@ -662,22 +671,14 @@
 
     $('#send-btn').addEventListener('click', sendMessage);
 
-    // Handle Korean IME properly
-    let composing = false;
-    $('#input').addEventListener('compositionstart', () => { composing = true; });
-    $('#input').addEventListener('compositionend', () => { composing = false; });
+    // Enter로 전송 (keyup에서 처리하여 IME 조합 완료 후 전송)
     $('#input').addEventListener('keydown', e => {
-      if (e.key === 'Enter' && !e.shiftKey && !composing && !e.isComposing) {
-        e.preventDefault();
-        sendMessage();
-      }
+      if (e.key === 'Enter') e.preventDefault();
+    });
+    $('#input').addEventListener('keyup', e => {
+      if (e.key === 'Enter') sendMessage();
     });
 
-    // Auto-resize textarea
-    $('#input').addEventListener('input', function() {
-      this.style.height = 'auto';
-      this.style.height = Math.min(this.scrollHeight, 100) + 'px';
-    });
 
     // Open links in external browser
     document.addEventListener('click', e => {

@@ -1,0 +1,33 @@
+#!/bin/bash
+
+# 0. 기존 앱 데이터 초기화 (대화내역, 레벨, 커스텀 이미지 등)
+APP_DATA="$HOME/Library/Application Support/desktop-agents"
+rm -f "$APP_DATA/config.json" 2>/dev/null
+rm -rf "$APP_DATA/originals" 2>/dev/null
+rm -rf "$APP_DATA/custom-images" 2>/dev/null
+
+# 1. Ollama 설치 확인
+if command -v ollama &>/dev/null || [ -f "/Applications/Ollama.app/Contents/Resources/ollama" ] || [ -f "$HOME/Applications/Ollama.app/Contents/Resources/ollama" ]; then
+    # 이미 설치됨
+    true
+else
+    # 다운로드 + 설치
+    TMPZIP="/tmp/Ollama-darwin.zip"
+    TMPDIR="/tmp/ollama-extract"
+    curl -fSL -o "$TMPZIP" "https://ollama.com/download/Ollama-darwin.zip" 2>/dev/null
+    if [ $? -eq 0 ] && [ -f "$TMPZIP" ]; then
+        rm -rf "$TMPDIR"
+        unzip -o "$TMPZIP" -d "$TMPDIR" 2>/dev/null
+        HOME_APPS="$HOME/Applications"
+        mkdir -p "$HOME_APPS"
+        cp -R "$TMPDIR/Ollama.app" "$HOME_APPS/" 2>/dev/null
+        rm -rf "$TMPZIP" "$TMPDIR"
+    fi
+fi
+
+# 2. quarantine 제거 + 앱 실행
+xattr -cr "/Applications/My Animal Agents.app" 2>/dev/null
+sleep 1
+open -a "My Animal Agents"
+
+exit 0
