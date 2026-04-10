@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld('api', {
   getBarPosition: () => ipcRenderer.invoke('get-bar-position'),
   setBarPinned: (v) => ipcRenderer.invoke('set-bar-pinned', v),
   getBarPinned: () => ipcRenderer.invoke('get-bar-pinned'),
+  setCharSize: (size) => ipcRenderer.invoke('set-char-size', size),
+  getCharSize: () => ipcRenderer.invoke('get-char-size'),
   // 다마고치
   getAffinity: (agentId) => ipcRenderer.invoke('get-affinity', agentId),
   getAllAffinities: () => ipcRenderer.invoke('get-all-affinities'),
@@ -26,15 +28,21 @@ contextBridge.exposeInMainWorld('api', {
   setAgentCustom: (data) => ipcRenderer.invoke('set-agent-custom', data),
   resetAgentCustom: (agentId) => ipcRenderer.invoke('reset-agent-custom', agentId),
   pickAgentImage: (agentId) => ipcRenderer.invoke('pick-agent-image', agentId),
+  saveAgentImage: (agentId, dataUrl) => ipcRenderer.invoke('save-agent-image', { agentId, dataUrl }),
   resetAgentImage: (agentId) => ipcRenderer.invoke('reset-agent-image', agentId),
+  getAgentImagePath: (agentId, level) => ipcRenderer.invoke('get-agent-image-path', agentId, level),
   getDefaultRole: (agentId) => ipcRenderer.invoke('get-default-role', agentId),
   onBarLayout: (callback) => ipcRenderer.on('bar-layout', (_, layout) => callback(layout)),
+  onCharSize: (callback) => ipcRenderer.on('char-size', (_, size) => callback(size)),
   onBarPinned: (callback) => ipcRenderer.on('bar-pinned', (_, v) => callback(v)),
   // Ollama 상태
   getLlmStatus: () => ipcRenderer.invoke('get-llm-status'),
   getPendingChat: (agentId) => ipcRenderer.invoke('get-pending-chat', agentId),
   onChatResponse: (callback) => ipcRenderer.on('chat-response', (_, data) => callback(data)),
   onChatStream: (callback) => ipcRenderer.on('chat-stream', (_, data) => callback(data)),
+  // 포모도로
+  startPomodoro: (minutes) => ipcRenderer.invoke('start-pomodoro', minutes),
+  stopPomodoro: () => ipcRenderer.invoke('stop-pomodoro'),
   // Setup
   startSetup: () => ipcRenderer.invoke('start-setup'),
   setupComplete: () => ipcRenderer.invoke('setup-complete'),

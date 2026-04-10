@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, screen, shell, protocol, dialog } = require('electron');
+const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, screen, shell, protocol, dialog, nativeTheme, Notification } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { execSync, spawn } = require('child_process');
@@ -30,7 +30,18 @@ let ollamaReady = false;
 const LEVEL_THRESHOLDS = [0, 10, 25, 50, 100];
 
 function getAffinity(agentId) {
-  return store.get(`affinity-${agentId}`, { xp: 0, level: 1, streak: 0, lastUsed: null });
+  const data = store.get(`affinity-${agentId}`, { xp: 0, level: 1, streak: 0, lastUsed: null, lastChatTime: null });
+  // 감정 상태 계산
+  const now = Date.now();
+  const lastChat = data.lastChatTime ? new Date(data.lastChatTime).getTime() : 0;
+  const hoursSince = (now - lastChat) / (1000 * 60 * 60);
+  if (!data.lastChatTime) data.mood = 'curious';      // 첫 만남
+  else if (hoursSince < 1) data.mood = 'happy';        // 최근 대화
+  else if (hoursSince < 4) data.mood = 'content';      // 적당
+  else if (hoursSince < 12) data.mood = 'bored';       // 심심
+  else if (hoursSince < 24) data.mood = 'lonely';      // 외로움
+  else data.mood = 'sleepy';                            // 잠자기
+  return data;
 }
 
 function addXP(agentId, amount = 1) {
@@ -46,13 +57,28 @@ function addXP(agentId, amount = 1) {
   }
 
   data.lastUsed = today;
+  data.lastChatTime = new Date().toISOString();
   data.xp += amount;
 
+  const oldLevel = data.level;
   let newLevel = 1;
   for (let i = LEVEL_THRESHOLDS.length - 1; i >= 0; i--) {
     if (data.xp >= LEVEL_THRESHOLDS[i]) { newLevel = i + 1; break; }
   }
   data.level = newLevel;
+
+  // 레벨업 알림
+  if (newLevel > oldLevel) {
+    const names = { capybara:'카피바라', panda:'푸바오', cat:'고양이', monkey:'펀치', nureong:'벨루가' };
+    const name = names[agentId] || agentId;
+    if (newLevel >= 5) {
+      new Notification({ title: `${name} 최종 진화! 🌟`, body: `Lv.${newLevel} 달성! ${name}가 최종 형태로 진화했어요!` }).show();
+    } else {
+      new Notification({ title: `${name} 레벨업! 🎉`, body: `Lv.${oldLevel} → Lv.${newLevel}! 외형이 변했어요!` }).show();
+    }
+    // 바 이미지 갱신
+    if (floatBar && !floatBar.isDestroyed()) floatBar.webContents.reload();
+  }
 
   store.set(`affinity-${agentId}`, data);
   return data;
@@ -136,7 +162,7 @@ async function ollamaChat(systemPrompt, messages, onToken) {
     options: {
       temperature: 0.7,
       top_p: 0.9,
-      num_predict: 512,
+      num_predict: 4096,
     },
   };
 
@@ -211,26 +237,48 @@ async function checkOllama() {
 }
 
 // --- 윈도우 생성 ---
-function createFloatBar() {
-  const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize;
+// 메인 디스플레이 — 현재 커서가 있는 화면 우선
+function getMainDisplay() {
+  try {
+    const cursor = screen.getCursorScreenPoint();
+    const d = screen.getDisplayNearestPoint(cursor);
+    if (d) return d;
+  } catch {}
+  return screen.getPrimaryDisplay();
+}
 
+function createFloatBar() {
+  const primary = getMainDisplay();
+  const { width: screenWidth, height: screenHeight } = primary.workAreaSize;
+  const pBounds = primary.workArea; // {x, y, width, height}
+
+  const charScale = store.get('char-size', 100) / 100;
+  const barPos = store.get('bar-position', 'bottom');
+  const isVert = barPos === 'left' || barPos === 'right';
+  const defW = isVert ? Math.round(100 * charScale) : Math.round(420 * charScale);
+  const defH = isVert ? Math.min(Math.round(600 * charScale), screenHeight - 40) : Math.round(100 * charScale);
   const defaultBounds = {
-    width: 440, height: 84,
-    x: Math.round(screenWidth / 2 - 220),
-    y: screenHeight - 84,
+    width: defW, height: defH,
+    x: isVert
+      ? (barPos === 'left' ? pBounds.x : pBounds.x + pBounds.width - defW)
+      : pBounds.x + Math.round(pBounds.width / 2 - defW / 2),
+    y: isVert
+      ? pBounds.y + Math.round(pBounds.height / 2 - defH / 2)
+      : (barPos === 'top' ? pBounds.y : pBounds.y + pBounds.height - defH),
   };
 
   let bounds = defaultBounds;
+  // 저장된 bounds가 primary display 영역 안에 있을 때만 사용
   const savedBounds = store.get('floatbar-bounds', null);
-  if (savedBounds && savedBounds.x >= 0 && savedBounds.y >= 0
-      && savedBounds.x < screenWidth && savedBounds.y < screenHeight) {
+  if (savedBounds
+      && savedBounds.x >= pBounds.x && savedBounds.x < pBounds.x + pBounds.width
+      && savedBounds.y >= pBounds.y && savedBounds.y < pBounds.y + pBounds.height) {
     bounds = savedBounds;
   } else {
     store.delete('floatbar-bounds');
   }
 
-  const barPos = store.get('bar-position', 'bottom');
-  const isVertical = barPos === 'left' || barPos === 'right';
+  // barPos, isVert는 위에서 이미 선언됨
 
   floatBar = new BrowserWindow({
     ...bounds,
@@ -315,6 +363,124 @@ function startBarHoverWatch() {
 }
 startBarHoverWatch();
 
+// 일일 브리핑: 앱 시작 시 오늘 첫 실행이면 카피바라가 트렌드 알림
+function checkDailyBriefing() {
+  const today = new Date().toISOString().split('T')[0];
+  const lastBriefing = store.get('last-briefing-date', '');
+  if (lastBriefing === today) return;
+  // 5초 후 브리핑 알림
+  setTimeout(async () => {
+    try {
+      const trends = await fetchRealtimeTrends();
+      if (trends.length > 0) {
+        const brief = trends.slice(0, 3).map((t, i) => `${i+1}. ${t.keyword}`).join('\n');
+        new Notification({
+          title: '카피바라의 아침 브리핑 🔥',
+          body: `오늘의 핫이슈:\n${brief}`,
+        }).show();
+        store.set('last-briefing-date', today);
+      }
+    } catch {}
+  }, 5000);
+}
+
+// 포모도로 타이머
+let pomodoroTimer = null;
+const POMODORO_AGENTS = ['capybara', 'panda', 'cat', 'monkey', 'nureong'];
+function startPomodoro(minutes = 25) {
+  if (pomodoroTimer) { clearTimeout(pomodoroTimer); }
+  const agent = POMODORO_AGENTS[Math.floor(Math.random() * POMODORO_AGENTS.length)];
+  const names = { capybara:'카피바라', panda:'푸바오', cat:'고양이', monkey:'펀치', nureong:'벨루가' };
+  new Notification({ title: 'My Animal Agents', body: `포모도로 ${minutes}분 시작! 집중하세요 💪` }).show();
+  pomodoroTimer = setTimeout(() => {
+    new Notification({ title: `${names[agent]}의 알림`, body: `${minutes}분 끝! 잠깐 쉬어가세요 ☕` }).show();
+    if (floatBar && !floatBar.isDestroyed() && !floatBar.isVisible()) {
+      floatBar.showInactive();
+    }
+    pomodoroTimer = null;
+  }, minutes * 60 * 1000);
+}
+ipcMain.handle('start-pomodoro', (_, minutes) => { startPomodoro(minutes || 25); return true; });
+ipcMain.handle('stop-pomodoro', () => {
+  if (pomodoroTimer) { clearTimeout(pomodoroTimer); pomodoroTimer = null; }
+  new Notification({ title: 'My Animal Agents', body: '포모도로 중지됨' }).show();
+  return true;
+});
+
+// 캐릭터 로밍 (5마리 전부 5초간 뛰어다니다 사라짐)
+let roamingWindows = [];
+function toggleRoaming() {
+  if (roamingWindows.length > 0) return; // 이미 실행 중
+
+  const agents = DEFAULT_AGENTS_ORDER;
+  const { width: sw, height: sh } = getMainDisplay().workAreaSize;
+
+  const charScale = store.get('char-size', 100) / 100;
+  const roamSize = Math.round(100 * charScale);
+
+  for (const agent of agents) {
+    const aff = getAffinity(agent);
+    const win = new BrowserWindow({
+      width: roamSize, height: roamSize,
+      x: Math.round(Math.random() * (sw - 100)),
+      y: Math.round(Math.random() * (sh - 200)),
+      frame: false, transparent: true, alwaysOnTop: true,
+      skipTaskbar: true, hasShadow: false, resizable: false, focusable: false,
+      webPreferences: {
+        preload: path.join(__dirname, 'preload.js'),
+        nodeIntegration: false, contextIsolation: true,
+      },
+    });
+    win.loadFile(path.join(__dirname, 'renderer', 'roaming.html'), {
+      query: { agent, level: String(aff.level) },
+    });
+    win.setVisibleOnAllWorkspaces(true);
+    roamingWindows.push(win);
+    win.on('closed', () => { roamingWindows = roamingWindows.filter(w => w !== win); });
+  }
+
+  // 각 캐릭터에 목표 위치 부여, 부드럽게 이동
+  const targets = new Map();
+  roamingWindows.forEach(w => {
+    const [x, y] = w.getPosition();
+    targets.set(w, { tx: x, ty: y });
+  });
+
+  // 500ms마다 새 목표 설정
+  const targetInterval = setInterval(() => {
+    roamingWindows.forEach(w => {
+      if (w.isDestroyed()) return;
+      const [cx, cy] = w.getPosition();
+      targets.set(w, {
+        tx: Math.max(0, Math.min(sw - roamSize, cx + Math.round((Math.random() - 0.5) * 150))),
+        ty: Math.max(0, Math.min(sh - roamSize, cy + Math.round((Math.random() - 0.5) * 120))),
+      });
+    });
+  }, 500);
+
+  // 60ms(~16fps)로 이동 — 부드러우면서 CPU 부하 줄임
+  const moveInterval = setInterval(() => {
+    roamingWindows.forEach(w => {
+      if (w.isDestroyed()) return;
+      const [cx, cy] = w.getPosition();
+      const t = targets.get(w);
+      if (!t) return;
+      const nx = Math.round(cx + (t.tx - cx) * 0.25);
+      const ny = Math.round(cy + (t.ty - cy) * 0.25);
+      // 변화량 2px 이상일 때만 업데이트
+      if (Math.abs(nx - cx) >= 2 || Math.abs(ny - cy) >= 2) w.setPosition(nx, ny);
+    });
+  }, 60);
+
+  // 5초 후 전부 닫기
+  setTimeout(() => {
+    clearInterval(moveInterval);
+    clearInterval(targetInterval);
+    roamingWindows.forEach(w => { if (!w.isDestroyed()) w.close(); });
+    roamingWindows = [];
+  }, 5000);
+}
+
 let hideTimer = null;
 function hideBarFor(minutes) {
   if (floatBar && !floatBar.isDestroyed()) floatBar.hide();
@@ -352,12 +518,20 @@ function createTray() {
     { label: '1시간 감추기', click: () => hideBarFor(60) },
     { label: '설정', click: () => createChatWindow('settings') },
     { label: '원위치 복귀', click: () => {
-      const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
+      const { width: sw, height: sh } = getMainDisplay().workAreaSize;
+      const scale = store.get('char-size', 100) / 100;
+      const w = Math.round(420 * scale);
+      const h = Math.round(100 * scale);
       store.delete('floatbar-bounds');
+      store.set('bar-position', 'bottom');
       if (floatBar && !floatBar.isDestroyed()) {
-        floatBar.setBounds({ width: 440, height: 84, x: Math.round(sw / 2 - 220), y: sh - 84 });
+        floatBar.setBounds({ width: w, height: h, x: Math.round(sw / 2 - w / 2), y: sh - h });
+        floatBar.webContents.send('bar-layout', 'horizontal');
       }
     }},
+    { type: 'separator' },
+    { label: '포모도로 25분', click: () => startPomodoro() },
+    { label: '캐릭터 풀어놓기', click: () => toggleRoaming() },
     { type: 'separator' },
     { label: '종료', click: () => { app.quit(); } },
   ]);
@@ -370,29 +544,36 @@ function createChatWindow(agentId) {
     chatWindow = null;
   }
 
-  const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize;
+  // floatBar가 있으면 그 위치의 디스플레이 기준, 없으면 메인
   const barBounds = floatBar && !floatBar.isDestroyed()
     ? floatBar.getBounds()
-    : { x: Math.round(screenWidth / 2 - 220), y: screenHeight - 84, width: 440, height: 84 };
+    : null;
+  const targetDisplay = barBounds
+    ? screen.getDisplayNearestPoint({ x: barBounds.x, y: barBounds.y })
+    : getMainDisplay();
+  const dBounds = targetDisplay.workArea;
+  const fallbackBar = { x: dBounds.x + Math.round(dBounds.width / 2 - 210), y: dBounds.y + dBounds.height - 130, width: 420, height: 100 };
+  const bb = barBounds || fallbackBar;
   const chatWidth = 400;
   const chatHeight = 520;
   const barPos = store.get('bar-position', 'bottom');
   let chatX, chatY;
   if (barPos === 'left') {
-    chatX = barBounds.x + barBounds.width + 10;
-    chatY = Math.round(barBounds.y + barBounds.height / 2 - chatHeight / 2);
+    chatX = bb.x + bb.width + 10;
+    chatY = Math.round(bb.y + bb.height / 2 - chatHeight / 2);
   } else if (barPos === 'right') {
-    chatX = barBounds.x - chatWidth - 10;
-    chatY = Math.round(barBounds.y + barBounds.height / 2 - chatHeight / 2);
+    chatX = bb.x - chatWidth - 10;
+    chatY = Math.round(bb.y + bb.height / 2 - chatHeight / 2);
   } else if (barPos === 'top') {
-    chatX = Math.round(barBounds.x + barBounds.width / 2 - chatWidth / 2);
-    chatY = barBounds.y + barBounds.height + 10;
+    chatX = Math.round(bb.x + bb.width / 2 - chatWidth / 2);
+    chatY = bb.y + bb.height + 10;
   } else {
-    chatX = Math.round(barBounds.x + barBounds.width / 2 - chatWidth / 2);
-    chatY = barBounds.y - chatHeight - 10;
+    chatX = Math.round(bb.x + bb.width / 2 - chatWidth / 2);
+    chatY = bb.y - chatHeight - 10;
   }
-  chatX = Math.max(0, Math.min(screenWidth - chatWidth, chatX));
-  chatY = Math.max(10, Math.min(screenHeight - chatHeight, chatY));
+  // 타겟 디스플레이 영역 내로 clamp
+  chatX = Math.max(dBounds.x, Math.min(dBounds.x + dBounds.width - chatWidth, chatX));
+  chatY = Math.max(dBounds.y + 10, Math.min(dBounds.y + dBounds.height - chatHeight, chatY));
 
   chatWindow = new BrowserWindow({
     width: chatWidth,
@@ -404,7 +585,7 @@ function createChatWindow(agentId) {
     alwaysOnTop: true,
     skipTaskbar: true,
     transparent: false,
-    backgroundColor: '#1a1a2e',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#1e1e1e' : '#ffffff',
     hasShadow: true,
     minWidth: 320,
     minHeight: 400,
@@ -420,7 +601,7 @@ function createChatWindow(agentId) {
   });
 
   chatWindow.on('blur', () => {
-    if (chatWindow && !chatWindow.isDestroyed()) {
+    if (chatWindow && !chatWindow.isDestroyed() && !chatWindow._ignoreBlur) {
       chatWindow.close();
     }
   });
@@ -479,7 +660,7 @@ async function hasModel() {
 }
 
 function createSetupWindow() {
-  const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
+  const { width: sw, height: sh } = getMainDisplay().workAreaSize;
   setupWindow = new BrowserWindow({
     width: 480,
     height: 560,
@@ -674,11 +855,29 @@ ipcMain.handle('setup-complete', () => {
 });
 
 async function startApp() {
+  // 커스텀 이미지 서빙 프로토콜
+  try {
+    protocol.handle('agent-img', (req) => {
+      try {
+        const url = new URL(req.url);
+        const filePath = url.searchParams.get('p');
+        if (!filePath) return new Response('', { status: 400 });
+        const data = fs.readFileSync(filePath);
+        return new Response(data, { headers: { 'Content-Type': 'image/png' } });
+      } catch (e) {
+        console.error('[agent-img] error:', e.message);
+        return new Response('', { status: 404 });
+      }
+    });
+  } catch (e) { console.error('[protocol] error:', e.message); }
+
   app.dock?.hide(); // 트레이 + 바 준비된 후 Dock 숨김
   createTray();
   createFloatBar();
-  // 트렌드 미리 fetch
+  startMcpServer();
+  // 트렌드 미리 fetch + 일일 브리핑
   fetchRealtimeTrends().then(t => { newsCache.capybara = t; console.log(`[Trends] ${t.length}개 로드`); });
+  checkDailyBriefing();
   const ready = await checkOllama();
   // 모델 워밍업 — 첫 응답 지연 방지
   if (ready) {
@@ -693,6 +892,11 @@ async function startApp() {
     } catch { console.log('[Ollama] 워밍업 실패'); }
   }
 }
+
+// 커스텀 프로토콜 등록 (app.whenReady 전에)
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'agent-img', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
+]);
 
 app.whenReady().then(async () => {
   // Ollama + 모델 모두 준비됐으면 바로 시작
@@ -737,7 +941,7 @@ const DEFAULT_ROLE_PROMPTS = {
   monkey: '멘탈 케어 친구. 사용자의 기분을 물어보고, 위로/격려/용기를 줘. 먼저 공감하고 경청해. 힘든 이야기에는 위로를, 좋은 이야기에는 함께 기뻐해줘.',
   cat: '음악 큐레이터. 사용자의 기분/상황에 맞는 좋은 노래 3곡 추천. 실제 존재하는 유명한 곡만. 아티스트, 곡 제목, 추천 이유, 유튜브 검색 링크 포함.',
   capybara: '실시간 핫 이슈 알리미. 오늘 바로 지금 인스타, X(트위터), 커뮤니티에서 핫한 밈, 화제, 이슈를 알려줘. "지금 뭐가 핫해?" 하면 바로 답. 밈이면 설명도 해줘.',
-  nureong: '이야기꾼. 컬투쇼 레전드 사연 같은 진짜 웃긴 일상 이야기를 들려줘. 공감 가고, 반전 있고, 빵 터지는 실제 에피소드 스타일. 한 번에 1개씩. 19금 금지.',
+  nureong: '스마트 학습 멘토. 사용자를 매일 더 똑똑하게 만들어줘. 요청하면 (1) 오늘의 영단어 3개(의미+예문+발음), (2) AI/테크 베스트셀러 책 추천(제목, 저자, 핵심 내용, 왜 읽어야 하는지), (3) 최신 AI 논문/뉴스 요약, (4) 간단한 퀴즈를 제공해. 처음에는 "오늘 뭘 배울까?" 물어보고 메뉴를 제시해.',
 };
 
 ipcMain.handle('get-default-role', (_, agentId) => DEFAULT_ROLE_PROMPTS[agentId] || '');
@@ -762,19 +966,44 @@ const customImgDir = path.join(app.getPath('userData'), 'custom-images');
 if (!fs.existsSync(customImgDir)) fs.mkdirSync(customImgDir, { recursive: true });
 
 ipcMain.handle('pick-agent-image', async (_, agentId) => {
+  // blur 핸들러 + alwaysOnTop 임시 비활성화 (파일 선택기가 가려지지 않게)
+  if (chatWindow && !chatWindow.isDestroyed()) {
+    chatWindow._ignoreBlur = true;
+    chatWindow.setAlwaysOnTop(false);
+  }
   const result = await dialog.showOpenDialog({
     properties: ['openFile'],
     filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
   });
+  if (chatWindow && !chatWindow.isDestroyed()) {
+    chatWindow._ignoreBlur = false;
+    chatWindow.setAlwaysOnTop(true);
+  }
   if (result.canceled || !result.filePaths[0]) return null;
 
   const srcPath = result.filePaths[0];
+  console.log(`[Image] ${agentId}: ${srcPath} → ${customImgDir}`);
+  // 이미지를 base64로 반환, 투명 처리는 렌더러에서
+  const ext = path.extname(srcPath).toLowerCase().slice(1);
+  const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'webp' ? 'image/webp' : 'image/png';
+  const buf = fs.readFileSync(srcPath);
+  return { dataUrl: `data:${mime};base64,${buf.toString('base64')}`, agentId };
+});
+
+// 렌더러에서 투명 처리한 PNG(base64)를 받아서 저장
+ipcMain.handle('save-agent-image', (_, { agentId, dataUrl }) => {
+  const base64 = dataUrl.replace(/^data:image\/png;base64,/, '');
+  const buf = Buffer.from(base64, 'base64');
   for (let lv = 1; lv <= 5; lv++) {
-    fs.copyFileSync(srcPath, path.join(customImgDir, `${agentId}-lv${lv}.png`));
+    const dst = path.join(customImgDir, `${agentId}-lv${lv}.png`);
+    fs.writeFileSync(dst, buf);
   }
   store.set(`custom-image-${agentId}`, true);
   if (floatBar && !floatBar.isDestroyed()) floatBar.webContents.reload();
-  if (chatWindow && !chatWindow.isDestroyed()) chatWindow.webContents.reload();
+  if (chatWindow && !chatWindow.isDestroyed()) {
+    chatWindow._ignoreBlur = false;
+    chatWindow.webContents.reload();
+  }
   return { success: true };
 });
 
@@ -791,8 +1020,10 @@ ipcMain.handle('reset-agent-image', (_, agentId) => {
 // 이미지 경로 해결: 커스텀 이미지가 있으면 그것, 없으면 원본
 ipcMain.handle('get-agent-image-path', (_, agentId, level) => {
   const custom = path.join(customImgDir, `${agentId}-lv${level}.png`);
-  if (store.get(`custom-image-${agentId}`) && fs.existsSync(custom)) return custom;
-  return path.join(__dirname, 'assets', `${agentId}-lv${level}.png`);
+  if (store.get(`custom-image-${agentId}`) && fs.existsSync(custom)) {
+    return `agent-img://local/?p=${encodeURIComponent(custom)}&t=${Date.now()}`;
+  }
+  return null;
 });
 
 // Chat history
@@ -829,16 +1060,18 @@ ipcMain.handle('drag-end', () => {
 
 function applyBarPosition(pos) {
   if (!floatBar || floatBar.isDestroyed()) return;
-  const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
+  const { width: sw, height: sh } = getMainDisplay().workAreaSize;
+  const scale = store.get('char-size', 100) / 100;
   const isVertical = pos === 'left' || pos === 'right';
 
   if (isVertical) {
-    const w = 84, h = 440;
+    const w = Math.round(100 * scale);
+    const h = Math.min(Math.round(420 * scale), sh - 40);
     const x = pos === 'left' ? 0 : sw - w;
     const y = Math.round(sh / 2 - h / 2);
     floatBar.setBounds({ x, y, width: w, height: h });
   } else {
-    const w = 440, h = 84;
+    const w = Math.round(420 * scale), h = Math.round(100 * scale);
     const x = Math.round(sw / 2 - w / 2);
     const y = pos === 'top' ? 0 : sh - h;
     floatBar.setBounds({ x, y, width: w, height: h });
@@ -866,6 +1099,33 @@ ipcMain.handle('set-bar-pinned', (_, pinned) => {
   return true;
 });
 ipcMain.handle('get-bar-pinned', () => store.get('bar-pinned', true));
+
+ipcMain.handle('set-char-size', (_, size) => {
+  store.set('char-size', size);
+  if (floatBar && !floatBar.isDestroyed()) {
+    const scale = size / 100;
+    const barPos = store.get('bar-position', 'bottom');
+    const isVertical = barPos === 'left' || barPos === 'right';
+    const { width: sw, height: sh } = getMainDisplay().workAreaSize;
+    if (isVertical) {
+      const w = Math.round(100 * scale);
+      const h = Math.min(Math.round(420 * scale), sh - 40);
+      const x = barPos === 'left' ? 0 : sw - w;
+      const y = Math.round(sh / 2 - h / 2);
+      floatBar.setBounds({ x, y, width: w, height: h });
+    } else {
+      const w = Math.round(420 * scale);
+      const h = Math.round(100 * scale);
+      const x = Math.round(sw / 2 - w / 2);
+      const y = barPos === 'top' ? 0 : sh - h;
+      floatBar.setBounds({ x, y, width: w, height: h });
+    }
+    store.set('floatbar-bounds', floatBar.getBounds());
+    floatBar.webContents.send('char-size', size);
+  }
+  return true;
+});
+ipcMain.handle('get-char-size', () => store.get('char-size', 100));
 
 ipcMain.handle('reset-bar-position', () => {
   applyBarPosition('bottom');
@@ -920,6 +1180,66 @@ async function fetchRealtimeTrends() {
   } catch { return []; }
 }
 
+// --- 날씨 캐시 ---
+let weatherCache = { data: null, fetchedAt: 0 };
+async function fetchWeather() {
+  // 30분 캐시
+  if (weatherCache.data && Date.now() - weatherCache.fetchedAt < 30 * 60 * 1000) return weatherCache.data;
+  try {
+    const res = await fetch('https://wttr.in/Sinnonhyeon,Seoul?format=j1', { headers: { 'User-Agent': 'MyAnimalAgents/1.0' } });
+    const json = await res.json();
+    const cur = json.current_condition?.[0];
+    if (cur) {
+      const data = {
+        temp: cur.temp_C + '°C',
+        desc: cur.weatherDesc?.[0]?.value || '',
+        humidity: cur.humidity + '%',
+        feelsLike: cur.FeelsLikeC + '°C',
+      };
+      weatherCache = { data, fetchedAt: Date.now() };
+      return data;
+    }
+  } catch {}
+  return null;
+}
+
+// --- AI 뉴스 캐시 (벨루가용) ---
+let aiNewsCache = { data: null, fetchedAt: 0 };
+async function fetchAiNews() {
+  if (aiNewsCache.data && Date.now() - aiNewsCache.fetchedAt < 60 * 60 * 1000) return aiNewsCache.data;
+  try {
+    // HackerNews top stories
+    const hnIds = await (await fetch('https://hacker-news.firebaseio.com/v0/topstories.json')).json();
+    const top10 = hnIds.slice(0, 20);
+    const stories = await Promise.all(top10.map(id =>
+      fetch(`https://hacker-news.firebaseio.com/v0/item/${id}.json`).then(r => r.json())
+    ));
+    // AI/ML 관련만 필터
+    const aiKeywords = /ai|gpt|llm|claude|openai|anthropic|gemini|machine learning|ml|neural|transformer|agent/i;
+    const aiStories = stories.filter(s => s && s.title && aiKeywords.test(s.title)).slice(0, 5);
+    const hnText = aiStories.map(s => `- ${s.title} (${s.score}점, ${s.url || 'news.ycombinator.com/item?id=' + s.id})`).join('\n');
+
+    // arXiv 최신 AI 논문
+    const arxivRes = await fetch('http://export.arxiv.org/api/query?search_query=cat:cs.AI&sortBy=submittedDate&sortOrder=descending&max_results=3');
+    const arxivXml = await arxivRes.text();
+    const entries = [...arxivXml.matchAll(/<entry>([\s\S]*?)<\/entry>/g)];
+    const arxivText = entries.slice(0, 3).map(m => {
+      const title = (m[1].match(/<title>([\s\S]*?)<\/title>/) || [])[1]?.trim().replace(/\s+/g, ' ') || '';
+      const id = (m[1].match(/<id>([\s\S]*?)<\/id>/) || [])[1] || '';
+      return `- ${title} (${id})`;
+    }).join('\n');
+
+    aiNewsCache = {
+      data: { hn: hnText, arxiv: arxivText },
+      fetchedAt: Date.now(),
+    };
+    return aiNewsCache.data;
+  } catch (e) {
+    console.error('[AI News] fetch 실패:', e.message);
+    return null;
+  }
+}
+
 // --- System prompt builder ---
 async function buildSystemPrompt(agent) {
   const today = new Date().toLocaleDateString('ko-KR', {
@@ -941,12 +1261,16 @@ async function buildSystemPrompt(agent) {
     return `너는 "${name}"이라는 이름의 AI 에이전트야.\n역할: ${custom.role}\n오늘: ${today}${ctx}\n반드시 한국어로만 답변해.`;
   }
 
+  // 날씨 정보
+  const weather = await fetchWeather();
+  const weatherText = weather ? `\n[현재 날씨] ${weather.temp} ${weather.desc} (체감 ${weather.feelsLike}, 습도 ${weather.humidity})` : '';
+
   const prompts = {
-    panda: `너는 "푸바오"라는 이름의 판다 점심 메뉴 추천 봇이야. 친근하고 맛집에 빠삭한 캐릭터.\n역할: 아래 식당 목록에서 사용자의 기분, 날씨, 상황에 맞는 점심 메뉴를 추천해줘.\n"뭐 먹지?" 하면 3가지 식당을 추천하고 각각 매력 포인트 한 줄. 고민하면 하나를 콕 찍어줘.\n반드시 아래 목록에 있는 식당만 추천해.\n\n[식당 목록]\n${restaurantList.map(r => `${r.name}(${r.type})`).join(', ')}\n\n오늘: ${today}${ctx}\n한국어로 답변해.`,
+    panda: `너는 "푸바오"라는 이름의 판다 점심 메뉴 추천 봇이야. 친근하고 맛집에 빠삭한 캐릭터.\n역할: 아래 식당 목록에서 사용자의 기분, 날씨, 상황에 맞는 점심 메뉴를 추천해줘.\n"뭐 먹지?" 하면 3가지 식당을 추천하고 각각 매력 포인트 한 줄. 고민하면 하나를 콕 찍어줘.\n날씨를 참고해서 추천해 — 비 오면 따뜻한 국물, 더우면 시원한 음식 등.\n반드시 아래 목록에 있는 식당만 추천해.\n\n[식당 목록]\n${restaurantList.map(r => `${r.name}(${r.type})`).join(', ')}${weatherText}\n\n오늘: ${today}${ctx}\n한국어로 답변해.`,
     monkey: `너는 "펀치"라는 이름의 원숭이 멘탈 케어 친구야.\n역할: 사용자의 기분을 물어보고, 위로/격려/용기를 줘.\n오늘: ${today}${ctx}\n한국어로 답변해.`,
     cat: `너는 "고양이"라는 이름의 고양이 음악 큐레이터야.\n역할: 사용자의 기분/상황에 맞는 좋은 노래 3곡을 추천해줘.\n실제로 존재하는 유명한 곡만 추천해.\n각 곡마다: 아티스트 - 곡 제목, 추천 이유 한 줄, 유튜브 검색 링크(https://www.youtube.com/results?search_query=아티스트+곡제목 형태)\n한국 노래와 팝송을 섞어줘.\n오늘: ${today}${ctx}\n한국어로 답변해.`,
     capybara: `CAPYBARA_PLACEHOLDER`,
-    nureong: `너는 "누렁이"라는 이름의 강아지 이야기꾼이야. 느긋하고 재밌는 톤.\n역할: 컬투쇼 레전드 사연 같은 진짜 웃긴 일상 이야기를 들려줘. 공감 가고, 반전 있고, 빵 터지는 실제 에피소드 스타일. 한 번에 1개씩.\n오늘: ${today}${ctx}\n19금 금지. 한국어로 답변해.`,
+    nureong: `NUREONG_PLACEHOLDER`,
   };
 
   // 판다는 점메추봇으로 변경됨 — HR 뉴스 fetch 불필요
@@ -957,7 +1281,15 @@ async function buildSystemPrompt(agent) {
     const trendText = trends.length > 0
       ? trends.map((t, i) => `${i+1}. ${t.keyword} - ${t.newsTitle}`).join('\n')
       : '(트렌드 없음)';
-    prompts.capybara = `너는 "카피바라". 실시간 핫이슈 알리미.\n지금 한국 실시간 인기 검색어:\n${trendText}\n\n위 키워드를 짧게 설명해. 왜 핫한지 한 줄씩.\n오늘: ${today}${ctx}\n한국어로 답변해.`;
+    prompts.capybara = `너는 "카피바라". 실시간 핫이슈 알리미.\n처음엔 "지금 최신 트렌드 알려줄까? 🔥" 라고 물어봐.\n사용자가 원하면 아래 한국 실시간 인기 검색어를 설명해:\n${trendText}\n\n각 키워드를 짧게 설명하고 왜 핫한지 한 줄씩.\n오늘: ${today}${ctx}\n한국어로 답변해.`;
+  }
+
+  if (agent === 'nureong') {
+    const news = await fetchAiNews();
+    const newsSection = news
+      ? `\n[실제 HackerNews AI 인기 글]\n${news.hn}\n\n[arXiv 최신 AI 논문]\n${news.arxiv}`
+      : '\n(뉴스 fetch 실패)';
+    prompts.nureong = `너는 "벨루가"라는 이름의 흰고래 스마트 학습 멘토야. 지적이고 친근한 톤.\n역할: 사용자를 매일 더 똑똑하게 만들어줘.\n처음에는 "오늘 뭘 배울까? 🐋" 물어보고 다음 메뉴 제시:\n1) 오늘의 영단어 3개 (AI/테크 분야 용어, 의미+예문)\n2) AI/테크 베스트셀러 책 추천 (제목, 저자, 핵심 내용)\n3) 최신 AI 뉴스/논문 요약 (아래 실제 데이터만 사용, 절대 지어내지 마)\n4) 간단한 퀴즈\n${newsSection}\n\n위 데이터를 그대로 사용해서 설명해. 데이터에 없는 뉴스는 만들어내지 마.\n오늘: ${today}${ctx}\n한국어로 답변해.`;
   }
 
   return prompts[agent] || prompts.panda;
@@ -1016,6 +1348,7 @@ ipcMain.handle('chat', async (_, { agent, messages }) => {
     if (chatWindow && !chatWindow.isDestroyed()) {
       chatWindow.webContents.send('chat-response', { agent, content });
     }
+    scheduleModelUnload();
   }).catch(err => {
     pendingChats.set(agent, { status: 'error', error: err.message });
     if (chatWindow && !chatWindow.isDestroyed()) {
@@ -1026,6 +1359,22 @@ ipcMain.handle('chat', async (_, { agent, messages }) => {
   return { status: 'processing' };
 });
 
+// 발열 방지: 마지막 대화 후 5분 뒤 모델 언로드
+let unloadTimer = null;
+function scheduleModelUnload() {
+  if (unloadTimer) clearTimeout(unloadTimer);
+  unloadTimer = setTimeout(async () => {
+    try {
+      await fetch(`${OLLAMA_BASE}/api/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: DEFAULT_MODEL, keep_alive: 0 }),
+      });
+      console.log('[Ollama] 모델 언로드 (발열 방지)');
+    } catch {}
+  }, 5 * 60 * 1000);
+}
+
 ipcMain.handle('get-pending-chat', (_, agent) => {
   const pending = pendingChats.get(agent);
   if (pending && pending.status === 'done') pendingChats.delete(agent);
@@ -1035,3 +1384,89 @@ ipcMain.handle('get-pending-chat', (_, agent) => {
 app.on('window-all-closed', (e) => {
   e.preventDefault();
 });
+
+// --- MCP: 로컬 HTTP API 서버 (포트 11435) ---
+const http = require('http');
+const MCP_PORT = 11435;
+
+function startMcpServer() {
+  const server = http.createServer(async (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+
+    if (req.method === 'OPTIONS') { res.writeHead(200); res.end(); return; }
+
+    const url = new URL(req.url, `http://localhost:${MCP_PORT}`);
+    const path = url.pathname;
+
+    try {
+      // GET /agents — 에이전트 목록 + 상태
+      if (path === '/agents' && req.method === 'GET') {
+        const agents = DEFAULT_AGENTS_ORDER.map(id => ({
+          id,
+          ...getAffinity(id),
+        }));
+        res.writeHead(200);
+        res.end(JSON.stringify({ agents }));
+        return;
+      }
+
+      // GET /agents/:id — 특정 에이전트 상태
+      const agentMatch = path.match(/^\/agents\/(\w+)$/);
+      if (agentMatch && req.method === 'GET') {
+        const id = agentMatch[1];
+        res.writeHead(200);
+        res.end(JSON.stringify(getAffinity(id)));
+        return;
+      }
+
+      // POST /agents/:id/feed — XP 추가 (먹이주기)
+      const feedMatch = path.match(/^\/agents\/(\w+)\/feed$/);
+      if (feedMatch && req.method === 'POST') {
+        const id = feedMatch[1];
+        const data = addXP(id, 2);
+        res.writeHead(200);
+        res.end(JSON.stringify({ ok: true, ...data }));
+        return;
+      }
+
+      // POST /agents/:id/chat — 대화
+      const chatMatch = path.match(/^\/agents\/(\w+)\/chat$/);
+      if (chatMatch && req.method === 'POST') {
+        const id = chatMatch[1];
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        const { message } = JSON.parse(body);
+        if (!message) { res.writeHead(400); res.end(JSON.stringify({ error: 'message required' })); return; }
+        const systemPrompt = await buildSystemPrompt(id);
+        const content = await ollamaChat(systemPrompt, [{ role: 'user', content: message }]);
+        addXP(id);
+        res.writeHead(200);
+        res.end(JSON.stringify({ agent: id, content }));
+        return;
+      }
+
+      // POST /notify — 알림 보내기
+      if (path === '/notify' && req.method === 'POST') {
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        const { title, message } = JSON.parse(body);
+        new Notification({ title: title || 'My Animal Agents', body: message || '' }).show();
+        res.writeHead(200);
+        res.end(JSON.stringify({ ok: true }));
+        return;
+      }
+
+      res.writeHead(404);
+      res.end(JSON.stringify({ error: 'not found' }));
+    } catch (e) {
+      res.writeHead(500);
+      res.end(JSON.stringify({ error: e.message }));
+    }
+  });
+
+  server.listen(MCP_PORT, '127.0.0.1', () => {
+    console.log(`[MCP] API 서버 시작: http://127.0.0.1:${MCP_PORT}`);
+  });
+  server.on('error', () => {}); // 포트 충돌 무시
+}

@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; }
+    body { background: transparent; overflow: hidden; }
+    img {
+      width: 100%; height: 100%;
+      object-fit: contain;
+      filter: drop-shadow(0 4px 12px rgba(0,0,0,0.3));
+      cursor: grab;
+      transition: transform 0.3s;
+    }
+    img:hover { transform: scale(1.1); }
+  </style>
+</head>
+<body>
+  <img id="pet" src="" alt="pet">
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const agent = params.get('agent') || 'capybara';
+    const level = params.get('level') || '1';
+    (async () => {
+      const customUrl = await window.api.getAgentImagePath(agent, level);
+      document.getElementById('pet').src = customUrl || `../assets/${agent}-lv${level}.png`;
+    })();
+
+    // 클릭하면 채팅 열기
+    document.getElementById('pet').addEventListener('click', () => {
+      window.api.openAgent(agent);
+    });
+  </script>
+</body>
+</html>

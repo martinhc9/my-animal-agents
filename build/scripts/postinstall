@@ -1,17 +1,30 @@
 #!/bin/bash
 
-# 0. 기존 앱 데이터 초기화 (대화내역, 레벨, 커스텀 이미지 등)
+# 0. 실행 중인 앱 종료 (파일 잠김 해제)
+pkill -f "My Animal Agents" 2>/dev/null
+sleep 1
+
+# 1. 커스텀 이미지 + 플래그 초기화 (대화 기록은 유지)
 APP_DATA="$HOME/Library/Application Support/desktop-agents"
-rm -f "$APP_DATA/config.json" 2>/dev/null
 rm -rf "$APP_DATA/originals" 2>/dev/null
 rm -rf "$APP_DATA/custom-images" 2>/dev/null
 
+# config.json에서 custom-image-* 플래그 제거
+CONFIG="$APP_DATA/config.json"
+if [ -f "$CONFIG" ]; then
+  python3 -c "
+import json
+with open('$CONFIG') as f: d = json.load(f)
+keys = [k for k in d if k.startswith('custom-image-')]
+for k in keys: del d[k]
+with open('$CONFIG', 'w') as f: json.dump(d, f, ensure_ascii=False, indent=2)
+" 2>/dev/null
+fi
+
 # 1. Ollama 설치 확인
 if command -v ollama &>/dev/null || [ -f "/Applications/Ollama.app/Contents/Resources/ollama" ] || [ -f "$HOME/Applications/Ollama.app/Contents/Resources/ollama" ]; then
-    # 이미 설치됨
     true
 else
-    # 다운로드 + 설치
     TMPZIP="/tmp/Ollama-darwin.zip"
     TMPDIR="/tmp/ollama-extract"
     curl -fSL -o "$TMPZIP" "https://ollama.com/download/Ollama-darwin.zip" 2>/dev/null
